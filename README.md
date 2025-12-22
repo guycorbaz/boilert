@@ -1,38 +1,109 @@
-# Slint Rust Template
+# boilert 🌡️
 
-A template for a Rust application that's using [Slint](https://slint.rs/) for the user interface.
+`boilert` is a Water Boiler Monitoring application built with Rust and [Slint UI](https://slint.dev/). It monitors multiple 1-Wire temperature sensors, calculates stored energy, and publishes data to an MQTT broker.
 
-## About
+## Features
 
-This template helps you get started developing a Rust application with Slint as toolkit
-for the user interface. It demonstrates the integration between the `.slint` UI markup and
-Rust code, how to react to callbacks, get and set properties, and use basic widgets.
+- **Real-time Monitoring**: Visualizes up to 6 temperature sensors simultaneously.
+- **Energy Calculation**: Automatically calculates the thermal energy stored in your boiler (kWh).
+- **Temperature History**: Displays a 24-hour history graph for each sensor (15-minute resolution).
+- **MQTT Integration**: Streams sensor data and energy metrics to your home automation system.
+- **Dual Mode**: Runs in simulation mode on workstations or high-precision mode on Raspberry Pi.
 
-## Usage
+---
 
-1. Install Rust by following its [getting-started guide](https://www.rust-lang.org/learn/get-started).
-   Once this is done, you should have the `rustc` compiler and the `cargo` build system installed in your `PATH`.
-2. Download and extract the [ZIP archive of this repository](https://github.com/slint-ui/slint-rust-template/archive/refs/heads/main.zip).
-3. Rename the extracted directory and change into it:
-    ```
-    mv slint-rust-template-main my-project
-    cd my-project    
-    ```
-4. Build with `cargo`:
-    ```
-    cargo build
-    ```
-5. Run the application binary:
-    ```
-    cargo run
-    ```
+## Prerequisites
 
-We recommend using an IDE for development, along with our [LSP-based IDE integration for `.slint` files](https://github.com/slint-ui/slint/blob/master/tools/lsp/README.md). You can also load this project directly in [Visual Studio Code](https://code.visualstudio.com) and install our [Slint extension](https://marketplace.visualstudio.com/items?itemName=Slint.slint).
+- **Rust Toolchain**: [Install Rust](https://www.rust-lang.org/learn/get-started).
+- **MQTT Broker**: Access to an MQTT broker (e.g., Mosquitto).
+- **Hardware (Optional)**:
+  - Raspberry Pi with 1-Wire interface enabled (`dtoverlay=w1-gpio`).
+  - DS18B20 temperature sensors.
 
-## Next Steps
+---
 
-We hope that this template helps you get started, and that you enjoy exploring making user interfaces with Slint. To learn more
-about the Slint APIs and the `.slint` markup language, check out our [online documentation](https://slint.dev/docs).
+## Installation & Build
 
-Don't forget to edit this readme to replace it by yours, and edit the `name =` field in `Cargo.toml` to match the name of your
-project.
+### 1. Clone the repository
+
+```bash
+git clone <your-repo-url>
+cd boilert
+```
+
+### 2. Development / Simulation Mode
+
+To run with simulated data (useful for UI testing):
+
+```bash
+cargo run
+```
+
+### 3. Raspberry Pi Mode
+
+To build for real hardware, use the `pi` feature:
+
+```bash
+cargo build --release --features pi
+# or run directly
+cargo run --features pi
+```
+
+---
+
+## Configuration
+
+The application is configured via `config.toml` in the project root.
+
+```toml
+[mqtt]
+host = "mqtt.home.arpa"
+port = 1883
+base_topic = "boilert/sensors"
+
+[boiler]
+volume_l = 500.0           # Total volume in Liters
+reference_temp_c = 15.0    # Baseline cold water temperature
+energy_coefficient = 1.162 # Wh/l·K (standard for water)
+
+[[sensors]]
+name = "Top"
+id = "28-000000000001"     # 1-Wire device ID
+
+[[sensors]]
+name = "Bottom"
+id = "28-000000000002"
+```
+
+---
+
+## MQTT API
+
+The application publishes data to the following topics:
+
+| Topic | Description | Payload |
+|-------|-------------|---------|
+| `{base_topic}/{sensor_name}` | Temperature of a specific sensor | `f32` (Celsius) |
+| `{base_topic}/energy` | Total energy stored in the boiler | `f32` (kWh) |
+
+---
+
+## Technical Details
+
+### Energy Calculation
+
+The application calculates energy using the formula:
+`E (kWh) = (Volume (L) * ΔT (K) * 1.162) / 1000`
+Where `ΔT` is the difference between the average temperature of all sensors and the `reference_temp_c`.
+
+### History
+
+- **Resolution**: 1 point every 15 minutes.
+- **Capacity**: 96 points (24 hours).
+- **Visualization**: Rendered as SVG paths within the Slint UI.
+
+---
+
+## License
+
+MIT - See [LICENSE](LICENSE) for details.
