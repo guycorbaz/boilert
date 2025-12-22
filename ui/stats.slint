@@ -1,0 +1,108 @@
+import { PageStyle } from "styles.slint";
+import { Button } from "std-widgets.slint";
+import { Sensor } from "sensot.slint";
+
+export component StatsPage {
+    // Back button
+    callback back();
+
+    in property <string> s1_name: "Sensor 1";
+    in property <float> s1_val: 0.0;
+    in property <string> s2_name: "Sensor 2";
+    in property <float> s2_val: 0.0;
+    in property <string> s3_name: "Sensor 3";
+    in property <float> s3_val: 0.0;
+    in property <string> s4_name: "Sensor 4";
+    in property <float> s4_val: 0.0;
+    in property <string> s5_name: "Sensor 5";
+    in property <float> s5_val: 0.0;
+    in property <string> s6_name: "Sensor 6";
+    in property <float> s6_val: 0.0;
+
+    // History path data
+    in property <string> s1_history_path: "M 0 100 L 95 100";
+    in property <string> s2_history_path: "M 0 100 L 95 100";
+    in property <string> s3_history_path: "M 0 100 L 95 100";
+    in property <string> s4_history_path: "M 0 100 L 95 100";
+    in property <string> s5_history_path: "M 0 100 L 95 100";
+    in property <string> s6_history_path: "M 0 100 L 95 100";
+
+    Rectangle {
+        background: black;
+        border-color: black;
+        border-width: 1px;
+        x: 1px * PageStyle.ext_padding;
+        y: 1px * PageStyle.ext_padding;
+        width: parent.width - 1px * PageStyle.ext_padding;
+        height: parent.height - 0px * PageStyle.ext_padding;
+
+        // Page title
+        Text {
+            y: 0;
+            text: "Statistiques de température";
+            color: white;
+            font-size: 20pt;
+            font-weight: 800;
+        }
+
+        Rectangle {
+            y: 60px;
+            background: black;
+            GridLayout {
+                spacing: 20px;
+                Row {
+                    Sensor {
+                        name: s1_name;
+                        value: s1_val;
+                        history_path: s1_history_path;
+                    }
+
+                    Sensor {
+                        name: s2_name;
+                        value: s2_val;
+                        history_path: s2_history_path;
+                    }
+                }
+
+                Row {
+                    Sensor {
+                        name: s3_name;
+                        value: s3_val;
+                        history_path: s3_history_path;
+                    }
+
+                    Sensor {
+                        name: s4_name;
+                        value: s4_val;
+                        history_path: s4_history_path;
+                    }
+                }
+
+                Row {
+                    Sensor {
+                        name: s5_name;
+                        value: s5_val;
+                        history_path: s5_history_path;
+                    }
+
+                    Sensor {
+                        name: s6_name;
+                        value: s6_val;
+                        history_path: s6_history_path;
+                    }
+                }
+            }
+        }
+       // Back button
+        Button {
+            text: "Retour";
+            width: 120px;
+            height: 40px;
+            x: parent.width - self.width - 20px;
+            y: parent.height - self.height - 20px;
+            clicked => {
+                root.back();
+            }
+        }
+    }
+}

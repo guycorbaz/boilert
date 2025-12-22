@@ -1,0 +1,15 @@
+/target
+/dist
+**/*.rs.bk
+Cargo.lock
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# sensitive config (if applicable)
+# config.toml

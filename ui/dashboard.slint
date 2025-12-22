@@ -1,0 +1,60 @@
+import { PageStyle } from "styles.slint";
+import { Button, VerticalBox } from "std-widgets.slint";
+import { Boiler } from "boiler.slint";
+
+// Main dashboard page showing boiler status summary
+export component DashboardPage {
+    // Callback to switch to the statistics page
+    callback show-stats();
+    // Energy currently stored in the boiler (kWh)
+    in property <float> energy_kwh: 0.0;
+
+    Rectangle {
+        width: parent.width - 2px * PageStyle.ext_padding;
+        height: parent.height - 2px * PageStyle.ext_padding;
+        background: black;
+        border-color: black;
+        border-width: 1px;
+        x: 1px * PageStyle.ext_padding;
+        y: 1px * PageStyle.ext_padding;
+
+        // Page title
+        Text {
+            y: 0;
+            text: "Eau chaude";
+            color: white;
+            font-size: 20pt;
+            font-weight: 800;
+        }
+
+        // Visual representation of the chauffe-eau
+        Boiler {
+            x: 50px;
+            y: 90px;
+            width: 240px;
+            height: 280px;
+        }
+
+        // Energy stored value
+        Text {
+            x: 400px;
+            y: 180px;
+            text: "\{Math.round(root.energy_kwh * 10) / 10}kWh";
+            color: red;
+            font-size: 45pt;
+            font-weight: 800;
+        }
+
+        // Navigation button
+        Button {
+            text: "Stat";
+            width: 120px;
+            height: 40px;
+            x: parent.width - self.width - 20px;
+            y: parent.height - self.height - 20px;
+            clicked => {
+                root.show-stats();
+            }
+        }
+    }
+}

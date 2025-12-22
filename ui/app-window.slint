@@ -1,0 +1,92 @@
+import { Button } from "std-widgets.slint";
+import { DashboardPage, StatsPage } from "pages.slint";
+import { PageStyle } from "styles.slint";
+
+// Main application window that coordinates pages and data
+export component AppWindow inherits Window {
+    width: 800px;
+    height: 480px;
+    background: black;
+
+    // State property to track the active page (0 = Dashboard, 1 = Stats)
+    property <int> active-page: 0;
+    
+    // Global energy data
+    in property <float> energy_kwh: 0.0;
+    
+    // Software version
+    in property <string> app-version: "0.0.0";
+
+    // Sensor data properties, typically updated from Rust logic
+    in property <string> s1_name: "Sensor 1";
+    in property <float> s1_val: 0.0;
+    in property <string> s2_name: "Sensor 2";
+    in property <float> s2_val: 0.0;
+    in property <string> s3_name: "Sensor 3";
+    in property <float> s3_val: 0.0;
+    in property <string> s4_name: "Sensor 4";
+    in property <float> s4_val: 0.0;
+    in property <string> s5_name: "Sensor 5";
+    in property <float> s5_val: 0.0;
+    in property <string> s6_name: "Sensor 6";
+    in property <float> s6_val: 0.0;
+
+    // History path data for the 24-hour charts
+    in property <string> s1_history_path: "M 0 100 L 95 100";
+    in property <string> s2_history_path: "M 0 100 L 95 100";
+    in property <string> s3_history_path: "M 0 100 L 95 100";
+    in property <string> s4_history_path: "M 0 100 L 95 100";
+    in property <string> s5_history_path: "M 0 100 L 95 100";
+    in property <string> s6_history_path: "M 0 100 L 95 100";
+
+    // Page: Dashboard
+    if (active-page == 0): DashboardPage {
+        x: 0px;
+        y: 0px;
+        width: parent.width - 1px * PageStyle.ext_padding;
+        height: parent.height - 1px * PageStyle.ext_padding;
+        energy_kwh: root.energy_kwh;
+        show-stats => {
+            active-page = 1;
+        }
+    }
+
+    // Page: Stats
+    if (active-page == 1): StatsPage {
+        x: 0px;
+        y: 0px;
+        width: parent.width - 1px * PageStyle.ext_padding;
+        height: parent.height - 1px * PageStyle.ext_padding;
+        s1_name: root.s1_name;
+        s1_val: root.s1_val;
+        s2_name: root.s2_name;
+        s2_val: root.s2_val;
+        s3_name: root.s3_name;
+        s3_val: root.s3_val;
+        s4_name: root.s4_name;
+        s4_val: root.s4_val;
+        s5_name: root.s5_name;
+        s5_val: root.s5_val;
+        s6_name: root.s6_name;
+        s6_val: root.s6_val;
+        s1_history_path: root.s1_history_path;
+        s2_history_path: root.s2_history_path;
+        s3_history_path: root.s3_history_path;
+        s4_history_path: root.s4_history_path;
+        s5_history_path: root.s5_history_path;
+        s6_history_path: root.s6_history_path;
+
+        back => {
+            active-page = 0;
+        }
+    }
+
+    // Version display at the bottom left
+    Text {
+        text: "v" + root.app-version;
+        color: lightgray;
+        font-size: 10px;
+        x: 10px;
+        y: parent.height - self.height - 5px;
+    }
+}
