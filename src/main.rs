@@ -78,15 +78,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     });
 
     // Initial UI setup
-    {
-        let ui = ui_weak.unwrap();
-        if config.sensors.len() > 0 { ui.set_s1_name(config.sensors[0].name.clone().into()); }
-        if config.sensors.len() > 1 { ui.set_s2_name(config.sensors[1].name.clone().into()); }
-        if config.sensors.len() > 2 { ui.set_s3_name(config.sensors[2].name.clone().into()); }
-        if config.sensors.len() > 3 { ui.set_s4_name(config.sensors[3].name.clone().into()); }
-        if config.sensors.len() > 4 { ui.set_s5_name(config.sensors[4].name.clone().into()); }
-        if config.sensors.len() > 5 { ui.set_s6_name(config.sensors[5].name.clone().into()); }
+    let mut initial_sensors = Vec::new();
+    for sensor in &config.sensors {
+        initial_sensors.push(SensorData {
+            name: sensor.name.clone().into(),
+            value: 0.0,
+            history_path: "".into(),
+        });
     }
+    ui.set_sensors(slint::ModelRc::from(initial_sensors.as_slice()));
 
     // Initialize history with current sensor values (read once)
     let mut history: Vec<SensorHistory> = Vec::new();
@@ -146,22 +146,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let ui_weak = ui_weak.clone();
                 let temps = temps.clone();
                 let history_paths: Vec<String> = history.iter().map(|h| h.to_svg_path()).collect();
+                let sensor_names: Vec<String> = sensor_config.sensors.iter().map(|s| s.name.clone()).collect();
                 move || {
                     if let Some(ui) = ui_weak.upgrade() {
-                        if temps.len() > 0 { ui.set_s1_val(temps[0]); }
-                        if temps.len() > 1 { ui.set_s2_val(temps[1]); }
-                        if temps.len() > 2 { ui.set_s3_val(temps[2]); }
-                        if temps.len() > 3 { ui.set_s4_val(temps[3]); }
-                        if temps.len() > 4 { ui.set_s5_val(temps[4]); }
-                        if temps.len() > 5 { ui.set_s6_val(temps[5]); }
-                        
-                        if history_paths.len() > 0 { ui.set_s1_history_path(history_paths[0].clone().into()); }
-                        if history_paths.len() > 1 { ui.set_s2_history_path(history_paths[1].clone().into()); }
-                        if history_paths.len() > 2 { ui.set_s3_history_path(history_paths[2].clone().into()); }
-                        if history_paths.len() > 3 { ui.set_s4_history_path(history_paths[3].clone().into()); }
-                        if history_paths.len() > 4 { ui.set_s5_history_path(history_paths[4].clone().into()); }
-                        if history_paths.len() > 5 { ui.set_s6_history_path(history_paths[5].clone().into()); }
-
+                        let mut sensor_data = Vec::new();
+                        for i in 0..temps.len() {
+                            sensor_data.push(SensorData {
+                                name: sensor_names[i].clone().into(),
+                                value: temps[i],
+                                history_path: history_paths[i].clone().into(),
+                            });
+                        }
+                        ui.set_sensors(slint::ModelRc::from(sensor_data.as_slice()));
                         ui.set_energy_kwh(energy_kwh);
                     }
                 }

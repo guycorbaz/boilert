@@ -1,31 +1,18 @@
 import { PageStyle } from "styles.slint";
-import { Button } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
 import { Sensor } from "sensot.slint";
+
+export struct SensorData {
+    name: string,
+    value: float,
+    history_path: string,
+}
 
 export component StatsPage {
     // Back button
     callback back();
 
-    in property <string> s1_name: "Sensor 1";
-    in property <float> s1_val: 0.0;
-    in property <string> s2_name: "Sensor 2";
-    in property <float> s2_val: 0.0;
-    in property <string> s3_name: "Sensor 3";
-    in property <float> s3_val: 0.0;
-    in property <string> s4_name: "Sensor 4";
-    in property <float> s4_val: 0.0;
-    in property <string> s5_name: "Sensor 5";
-    in property <float> s5_val: 0.0;
-    in property <string> s6_name: "Sensor 6";
-    in property <float> s6_val: 0.0;
-
-    // History path data
-    in property <string> s1_history_path: "M 0 100 L 95 100";
-    in property <string> s2_history_path: "M 0 100 L 95 100";
-    in property <string> s3_history_path: "M 0 100 L 95 100";
-    in property <string> s4_history_path: "M 0 100 L 95 100";
-    in property <string> s5_history_path: "M 0 100 L 95 100";
-    in property <string> s6_history_path: "M 0 100 L 95 100";
+    in property <[SensorData]> sensors;
 
     Rectangle {
         background: black;
@@ -48,47 +35,52 @@ export component StatsPage {
         Rectangle {
             y: 60px;
             background: black;
-            GridLayout {
+            VerticalBox {
                 spacing: 20px;
-                Row {
+                padding: 0px;
+                // Row 1
+                if root.sensors.length > 0: HorizontalBox {
+                    spacing: 20px;
                     Sensor {
-                        name: s1_name;
-                        value: s1_val;
-                        history_path: s1_history_path;
+                        name: root.sensors[0].name;
+                        value: root.sensors[0].value;
+                        history_path: root.sensors[0].history_path;
                     }
 
-                    Sensor {
-                        name: s2_name;
-                        value: s2_val;
-                        history_path: s2_history_path;
-                    }
-                }
-
-                Row {
-                    Sensor {
-                        name: s3_name;
-                        value: s3_val;
-                        history_path: s3_history_path;
-                    }
-
-                    Sensor {
-                        name: s4_name;
-                        value: s4_val;
-                        history_path: s4_history_path;
+                    if root.sensors.length > 1: Sensor {
+                        name: root.sensors[1].name;
+                        value: root.sensors[1].value;
+                        history_path: root.sensors[1].history_path;
                     }
                 }
-
-                Row {
+                // Row 2
+                if root.sensors.length > 2: HorizontalBox {
+                    spacing: 20px;
                     Sensor {
-                        name: s5_name;
-                        value: s5_val;
-                        history_path: s5_history_path;
+                        name: root.sensors[2].name;
+                        value: root.sensors[2].value;
+                        history_path: root.sensors[2].history_path;
                     }
 
+                    if root.sensors.length > 3: Sensor {
+                        name: root.sensors[3].name;
+                        value: root.sensors[3].value;
+                        history_path: root.sensors[3].history_path;
+                    }
+                }
+                // Row 3
+                if root.sensors.length > 4: HorizontalBox {
+                    spacing: 20px;
                     Sensor {
-                        name: s6_name;
-                        value: s6_val;
-                        history_path: s6_history_path;
+                        name: root.sensors[4].name;
+                        value: root.sensors[4].value;
+                        history_path: root.sensors[4].history_path;
+                    }
+
+                    if root.sensors.length > 5: Sensor {
+                        name: root.sensors[5].name;
+                        value: root.sensors[5].value;
+                        history_path: root.sensors[5].history_path;
                     }
                 }
             }
