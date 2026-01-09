@@ -26,7 +26,12 @@ The main entry point of the UI. It manages top-level state and page navigation.
 - **`AppWindow`**: Inherits from `Window`.
   - `active-page`: Controls which page is displayed (0 for Dashboard, 1 for Stats).
   - `energy_kwh`: Total energy stored in the boiler.
-  - `s[1-6]_(name/val)`: Properties for 6 temperature sensors.
+  - `sensors`: A model of `SensorData` containing name, current value, and history path for each configured thermometer (1-6).
+
+- **`SensorData`**: A struct containing:
+  - `name`: string
+  - `value`: float
+  - `history_path`: string
 
 ### [dashboard.slint](ui/dashboard.slint)
 
@@ -42,7 +47,8 @@ The default landing page.
 Displays detailed temperature data from all sensors.
 
 - **`StatsPage`**:
-  - Arranges six `Sensor` components in a grid.
+  - Dynamically displays `Sensor` components based on the `sensors` model.
+  - Arranges sensors in a **two-column layout** using nested `HorizontalBox`es.
   - Provides a "Retour" (Back) button to return to the dashboard.
 
 ### [sensot.slint](ui/sensot.slint)

@@ -8,16 +8,17 @@ export component AppWindow inherits Window {
     height: 480px;
     background: black;
 
-    // State property to track the active page (0 = Dashboard, 1 = Stats)
+    // Flag to control which page to display (0: Dashboard, 1: Statistics)
     property <int> active-page: 0;
     
-    // Global energy data
+    // Total thermal energy stored (kWh), calculated in the Rust backend
     in property <float> energy_kwh: 0.0;
     
-    // Software version
+    // SemVer compatible application version string
     in property <string> app-version: "0.0.0";
 
-    // Dynamic sensor model
+    // Dynamic model containing data for all configured temperature sensors.
+    // This model is populated and updated by the Rust backend loop.
     in property <[SensorData]> sensors: [
         { name: "S1", value: 0.0, history_path: "" },
         { name: "S2", value: 0.0, history_path: "" },

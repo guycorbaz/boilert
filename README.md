@@ -4,7 +4,7 @@
 
 ## Features
 
-- **Real-time Monitoring**: Visualizes up to 6 temperature sensors simultaneously.
+- **Real-time Monitoring**: Visualizes from 1 to 6 temperature sensors simultaneously, depending on configuration.
 - **Energy Calculation**: Automatically calculates the thermal energy stored in your boiler (kWh).
 - **Temperature History**: Displays a 24-hour history graph for each sensor (15-minute resolution).
 - **MQTT Integration**: Streams sensor data and energy metrics to your home automation system.

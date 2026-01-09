@@ -1,5 +1,9 @@
 //! Sensor interface for reading 1-Wire temperature sensors.
-//! Supports both real hardware access (Raspberry Pi) and dummy simulation for development.
+//!
+//! This module provides a unified interface for reading temperature data from DS18B20 
+//! sensors. It handles the low-level details of interacting with the Linux 1-Wire 
+//! bus when running on a Raspberry Pi, and provides a simulated data source for 
+//! development on other platforms.
 
 #[cfg(feature = "pi")]
 use anyhow::Context;
@@ -9,10 +13,14 @@ use std::fs;
 use anyhow::Result;
 
 #[cfg(feature = "pi")]
-/// Directory where 1-Wire devices are exposed in Linux sysfs.
+/// The base system path where 1-Wire device directories are located in Linux.
 const W1_DIR: &str = "/sys/bus/w1/devices";
 
-/// Reads the temperature from a specific sensor.
+/// Reads the current temperature from a specific 1-Wire sensor.
+///
+/// This function is feature-gated:
+/// - With `--features pi`: Reads directly from the `/sys/bus/w1/devices/<id>/w1_slave` file.
+/// - Without `--features pi`: Returns a random value between 20.0 and 30.0 for simulation.
 ///
 /// # Arguments
 /// * `_sensor_id` - The unique 1-Wire ID of the sensor (e.g., "28-000000000001").

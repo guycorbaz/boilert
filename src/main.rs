@@ -12,10 +12,14 @@ use tokio::time;
 slint::include_modules!();
 
 // --- History Management ---
+// We store 24 hours of data with 15-minute resolution.
 const HISTORY_POINTS: usize = 96; // 24 hours * 4 points/hour
 
+/// Buffer to store historical temperature data for a single sensor.
 struct SensorHistory {
+    /// Circular-like buffer of temperature values.
     points: Vec<f32>,
+    /// Last time a point was added to the history.
     last_update: std::time::Instant,
 }
 
@@ -33,12 +37,15 @@ impl SensorHistory {
         self.last_update = std::time::Instant::now();
     }
 
+    /// Maps the temperature data points to an SVG path string for Slint's Path element.
+    /// 
+    /// The X axis ranges from 0 to 95 (HISTORY_POINTS - 1).
+    /// The Y axis ranges from 0 (mapped to 100°C) to 100 (mapped to 0°C).
     fn to_svg_path(&self) -> String {
         let mut path = String::new();
         for (i, &temp) in self.points.iter().enumerate() {
-            // X: 0 to 95
-            // Y: 0 (top) to 100 (bottom). Map 100°C to 0 and 0°C to 100.
             let x = i as f32;
+            // Map 100°C to 0 (top of the graph) and 0°C to 100 (bottom of the graph).
             let y = (100.0 - temp).clamp(0.0, 100.0);
             if i == 0 {
                 path.push_str(&format!("M {} {} ", x, y));
@@ -133,7 +140,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 last_history_update = now;
             }
 
-            // Energy calculation
+            // Calculate the total thermal energy stored in the boiler (kWh).
+            // Formula: E = (m * cp * delta_T) / 3600
+            // Here: volume * energy_coefficient * (avg_temp - reference_temp) / 1000
             let avg_temp: f32 = if temps.is_empty() { 0.0 } else { temps.iter().sum::<f32>() / temps.len() as f32 };
             let delta_t = (avg_temp - sensor_config.boiler.reference_temp_c).max(0.0);
             let energy_kwh = (sensor_config.boiler.volume_l * delta_t * sensor_config.boiler.energy_coefficient) / 1000.0;
@@ -142,6 +151,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let energy_topic = format!("{}/energy", sensor_config.mqtt.base_topic);
             let _ = client.publish(energy_topic, rumqttc::QoS::AtLeastOnce, false, energy_kwh.to_string()).await;
 
+            // Batch UI updates and send them to the main Slint thread.
+            // We recreate the sensors model with the latest data and history paths.
             let _ = slint::invoke_from_event_loop({
                 let ui_weak = ui_weak.clone();
                 let temps = temps.clone();

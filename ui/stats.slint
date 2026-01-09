@@ -35,10 +35,15 @@ export component StatsPage {
         Rectangle {
             y: 60px;
             background: black;
+
+            // Container for the dynamic sensor list.
+            // We use a combination of VerticalBox and HorizontalBox to achieve a 
+            // two-column layout, as Slint's GridLayout doesn't currently support 
+            // dynamic 'for' loops for rows and columns.
             VerticalBox {
                 spacing: 20px;
                 padding: 0px;
-                // Row 1
+                // Row 1: Sensors 1 and 2
                 if root.sensors.length > 0: HorizontalBox {
                     spacing: 20px;
                     Sensor {
@@ -53,7 +58,7 @@ export component StatsPage {
                         history_path: root.sensors[1].history_path;
                     }
                 }
-                // Row 2
+                // Row 2: Sensors 3 and 4
                 if root.sensors.length > 2: HorizontalBox {
                     spacing: 20px;
                     Sensor {
@@ -68,7 +73,7 @@ export component StatsPage {
                         history_path: root.sensors[3].history_path;
                     }
                 }
-                // Row 3
+                // Row 3: Sensors 5 and 6
                 if root.sensors.length > 4: HorizontalBox {
                     spacing: 20px;
                     Sensor {

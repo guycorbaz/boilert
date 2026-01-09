@@ -36,16 +36,25 @@ pub struct BoilerConfig {
     pub energy_coefficient: f32,
 }
 
-/// Root configuration structure.
+/// The root configuration object for the application.
+/// 
+/// This struct is deserialized from `config.toml` and contains all the settings 
+/// required to run the monitoring loop and connect to external services.
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
+    /// Settings for the MQTT broker connection.
     pub mqtt: MqttConfig,
+    /// Physical characteristics and calculation constants for the water boiler.
     pub boiler: BoilerConfig,
+    /// List of temperature sensors to monitor.
     pub sensors: Vec<SensorConfig>,
 }
 
 impl Config {
-    /// Loads the configuration from `config.toml` in the current working directory.
+    /// Loads and parses the configuration from `config.toml` in the current directory.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be read or if the TOML content is invalid.
     pub fn load() -> Result<Self> {
         let content = fs::read_to_string("config.toml")
             .context("Failed to read config.toml")?;
