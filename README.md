@@ -158,6 +158,8 @@ The application publishes **retained** messages (QoS 1, client id `boilert-<pid>
 
 ## Deployment on Raspberry Pi
 
+📖 **A detailed installation manual** (bill of materials, sensor placement on the tank, 1-Wire wiring diagram, commissioning, troubleshooting) is available as a PDF: [`docs/installation-manual/installation-manual.pdf`](docs/installation-manual/installation-manual.pdf) (LaTeX sources alongside).
+
 A sample systemd unit is provided in [`deploy/boilert.service`](deploy/boilert.service). Adjust `User`, `WorkingDirectory` and `ExecStart` to your setup, then:
 
 ```bash
