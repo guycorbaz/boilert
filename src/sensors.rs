@@ -81,10 +81,16 @@ pub fn read_temperature(sensor_id: &str) -> Result<f32> {
     let mut temps = state.lock().expect("simulation state poisoned");
 
     let mut rng = rand::rng();
-    let seen = temps.len() as f32;
+    // Rank derived from the last digit of the sensor id, so the initial
+    // stratification is stable regardless of the (parallel) read order.
+    let rank = sensor_id
+        .chars()
+        .next_back()
+        .and_then(|c| c.to_digit(10))
+        .map_or(0.0, |d| d.saturating_sub(1) as f32);
     let temp = temps.entry(sensor_id.to_string()).or_insert_with(|| {
         // Stratified initial values: ~58 °C at the top, cooler further down.
-        58.0 - 6.0 * seen + rng.random_range(-1.0..1.0)
+        58.0 - 6.0 * rank + rng.random_range(-1.0..1.0)
     });
     // Slow drift, clamped to a realistic domestic hot water range.
     *temp = (*temp + rng.random_range(-0.15..0.15)).clamp(10.0, 75.0);

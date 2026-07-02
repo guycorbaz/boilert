@@ -1,19 +1,40 @@
-// Component representing the boiler (hot water tank)
+// Stylized vertical water tank, drawn in Slint (no bitmap asset).
+//
+// The body is tinted with the measured stratification: c0 is the color at the
+// TOP of the tank (hottest water) down to c5 at the BOTTOM (coldest water).
+// The six colors are interpolated by the Rust backend from the configured
+// sensors, so the tank visually reflects the real temperature profile.
 export component Boiler {
-    // Color at the top of the tank (hottest water)
-    in property <color> top-color: red;
-    // Color at the bottom of the tank (coldest water)
-    in property <color> bottom-color: blue;
+    in property <color> c0: #6e6e6e;
+    in property <color> c1: #6e6e6e;
+    in property <color> c2: #6e6e6e;
+    in property <color> c3: #6e6e6e;
+    in property <color> c4: #6e6e6e;
+    in property <color> c5: #6e6e6e;
 
+    // Tank body: rounded cylinder filled with the stratification gradient
     Rectangle {
         width: 100%;
         height: 100%;
-        Image {
-            source: @image-url("assets/boiler.svg");
-            width: parent.width;
-            height: parent.height;
-            // Tint the silhouette with the measured stratification gradient
-            colorize: @linear-gradient(180deg, root.top-color 0%, root.bottom-color 100%);
+        border-radius: self.width / 2.6;
+        border-width: 3px;
+        border-color: #3c3c38;
+        background: @linear-gradient(180deg,
+            root.c0 0%,
+            root.c1 20%,
+            root.c2 40%,
+            root.c3 60%,
+            root.c4 80%,
+            root.c5 100%);
+
+        // Soft vertical highlight to suggest a curved metallic surface
+        Rectangle {
+            x: parent.width * 0.10;
+            y: parent.height * 0.05;
+            width: parent.width * 0.20;
+            height: parent.height * 0.90;
+            border-radius: self.width / 2;
+            background: @linear-gradient(90deg, #ffffff30 0%, #ffffff00 100%);
         }
     }
 }

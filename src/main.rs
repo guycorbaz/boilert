@@ -22,11 +22,12 @@ const READ_INTERVAL: Duration = Duration::from_secs(2);
 /// Interval between two history points (15-minute resolution).
 const HISTORY_INTERVAL: Duration = Duration::from_secs(history::POINT_INTERVAL_S);
 
-/// Maps a water temperature to a display color: blue at 15 °C, red at 65 °C.
+/// Maps a water temperature to a display color: blue (#3987e5) at 15 °C,
+/// red (#e34948) at 65 °C — the diverging cold/hot pair of the palette.
 fn temp_to_color(temp: f32) -> slint::Color {
     let f = ((temp - 15.0) / 50.0).clamp(0.0, 1.0);
     let lerp = |a: f32, b: f32| (a + (b - a) * f).round() as u8;
-    slint::Color::from_rgb_u8(lerp(40.0, 220.0), lerp(90.0, 50.0), lerp(220.0, 40.0))
+    slint::Color::from_rgb_u8(lerp(57.0, 227.0), lerp(135.0, 73.0), lerp(229.0, 72.0))
 }
 
 /// Color for a possibly-unknown temperature (gray when no reading yet).
@@ -35,6 +36,43 @@ fn color_for(temp: Option<f32>) -> slint::Color {
         Some(t) => temp_to_color(t),
         None => slint::Color::from_rgb_u8(110, 110, 110),
     }
+}
+
+/// Interpolates the temperature at relative tank height `p` (0.0 = top,
+/// 1.0 = bottom) from the valid sensor readings, or `None` if there are none.
+fn interpolate_at(known: &[(f32, f32)], p: f32) -> Option<f32> {
+    let (first, last) = (known.first()?, known.last()?);
+    if p <= first.0 {
+        return Some(first.1);
+    }
+    if p >= last.0 {
+        return Some(last.1);
+    }
+    for pair in known.windows(2) {
+        let (p0, t0) = pair[0];
+        let (p1, t1) = pair[1];
+        if p <= p1 {
+            let f = if p1 > p0 { (p - p0) / (p1 - p0) } else { 0.0 };
+            return Some(t0 + (t1 - t0) * f);
+        }
+    }
+    Some(last.1)
+}
+
+/// Computes the 6 gradient stop colors of the tank display (top to bottom)
+/// by interpolating the valid sensor temperatures along the tank height.
+/// The first configured sensor is at the top of the tank.
+fn stratification_colors(last_valid: &[Option<f32>]) -> [slint::Color; 6] {
+    let n = last_valid.len();
+    let known: Vec<(f32, f32)> = last_valid
+        .iter()
+        .enumerate()
+        .filter_map(|(i, temp)| {
+            let pos = if n > 1 { i as f32 / (n - 1) as f32 } else { 0.5 };
+            temp.map(|t| (pos, t))
+        })
+        .collect();
+    std::array::from_fn(|k| color_for(interpolate_at(&known, k as f32 / 5.0)))
 }
 
 #[tokio::main]
@@ -77,6 +115,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             value_text: "--".into(),
             ok: true,
             history_path: "".into(),
+            history_fill: "".into(),
             hist_min_text: "".into(),
             hist_max_text: "".into(),
         })
@@ -243,11 +282,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Prepare display data off the UI thread.
             let mut rows: Vec<SensorData> = Vec::with_capacity(sensor_count);
             for i in 0..sensor_count {
-                let (path, lo, hi) = hist[i].svg_path();
-                let (min_label, max_label) = if path.is_empty() {
+                let graph = hist[i].svg_graph();
+                let (min_label, max_label) = if graph.line.is_empty() {
                     (String::new(), String::new())
                 } else {
-                    (format!("{lo:.0}°"), format!("{hi:.0}°"))
+                    (format!("{:.0}°", graph.lo), format!("{:.0}°", graph.hi))
                 };
                 rows.push(SensorData {
                     name: sensor_config.sensors[i].name.clone().into(),
@@ -256,7 +295,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         None => "--".into(),
                     },
                     ok: readings[i].is_some(),
-                    history_path: path.into(),
+                    history_path: graph.line.into(),
+                    history_fill: graph.fill.into(),
                     hist_min_text: min_label.into(),
                     hist_max_text: max_label.into(),
                 });
@@ -268,9 +308,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             };
             let all_sensors_ok = readings.iter().all(Option::is_some);
             let mqtt_ok = connected.load(Ordering::Relaxed);
-            // First configured sensor is at the top of the tank.
-            let top_color = color_for(last_valid.first().copied().flatten());
-            let bottom_color = color_for(last_valid.last().copied().flatten());
+            // Tank gradient stops, top (first sensor) to bottom (last sensor).
+            let strat = stratification_colors(&last_valid);
 
             // Batch UI updates and send them to the main Slint thread.
             let ui_weak = ui_weak.clone();
@@ -280,8 +319,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     ui.set_energy_text(energy_text);
                     ui.set_mqtt_connected(mqtt_ok);
                     ui.set_sensors_ok(all_sensors_ok);
-                    ui.set_boiler_top_color(top_color);
-                    ui.set_boiler_bottom_color(bottom_color);
+                    ui.set_boiler_c0(strat[0]);
+                    ui.set_boiler_c1(strat[1]);
+                    ui.set_boiler_c2(strat[2]);
+                    ui.set_boiler_c3(strat[3]);
+                    ui.set_boiler_c4(strat[4]);
+                    ui.set_boiler_c5(strat[5]);
                 }
             });
         }
@@ -296,4 +339,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// Marks the connection as lost and returns whether it was previously up.
 fn mqtt_was_connected(connected: &AtomicBool) -> bool {
     connected.swap(false, Ordering::Relaxed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interpolation_covers_the_whole_tank() {
+        // Sensors at the top, middle and bottom of the tank.
+        let known = vec![(0.0, 60.0), (0.5, 40.0), (1.0, 20.0)];
+        assert_eq!(interpolate_at(&known, 0.0), Some(60.0));
+        assert_eq!(interpolate_at(&known, 0.25), Some(50.0));
+        assert_eq!(interpolate_at(&known, 1.0), Some(20.0));
+    }
+
+    #[test]
+    fn interpolation_extends_to_edges_when_sensors_fail() {
+        // Only the two middle sensors are valid.
+        let known = vec![(0.4, 50.0), (0.6, 30.0)];
+        assert_eq!(interpolate_at(&known, 0.0), Some(50.0));
+        assert_eq!(interpolate_at(&known, 0.5), Some(40.0));
+        assert_eq!(interpolate_at(&known, 1.0), Some(30.0));
+    }
+
+    #[test]
+    fn no_reading_gives_no_temperature() {
+        assert_eq!(interpolate_at(&[], 0.5), None);
+    }
 }

@@ -1,5 +1,4 @@
-import { HorizontalBox, VerticalBox } from "std-widgets.slint";
-import { Thermometre } from "thermometre.slint";
+import { Theme } from "styles.slint";
 
 // Display data for one temperature sensor, prepared by the Rust backend.
 export struct SensorData {
@@ -8,74 +7,93 @@ export struct SensorData {
     value-text: string,
     // False when the last reading failed (sensor unplugged, CRC error, ...)
     ok: bool,
-    // SVG path commands for the 24-hour history graph (auto-scaled)
+    // SVG path commands for the 24-hour history line (auto-scaled)
     history-path: string,
+    // SVG path commands for the filled area under the line
+    history-fill: string,
     // Labels of the auto-scaled y-axis bounds of the history graph
     hist-min-text: string,
     hist-max-text: string,
 }
 
-// Component to display a single temperature sensor's data
+// Card displaying a single temperature sensor: name, current value, and a
+// 24-hour trend graph with an area fill.
 export component Sensor {
     in property <SensorData> data;
 
     Rectangle {
-        // A failing sensor gets a red border so it is visible at a glance
-        border-color: data.ok ? gray : #e74c3c;
+        border-radius: 12px;
+        background: Theme.card;
         border-width: 1px;
-        HorizontalBox {
-            // Visual indicator
-            Thermometre {
-                height: 60px;
-                width: 40px;
+        // A failing sensor gets a red border so it is visible at a glance
+        border-color: data.ok ? Theme.card-border : Theme.critical;
+
+        // Header: sensor name (left) and last valid value (right)
+        Text {
+            x: 14px;
+            y: 8px;
+            text: data.name;
+            color: Theme.text-secondary;
+            font-size: 12pt;
+            font-weight: 700;
+        }
+        Text {
+            x: parent.width - self.width - 14px;
+            y: 5px;
+            text: data.value-text;
+            color: data.ok ? Theme.text-primary : Theme.critical;
+            font-size: 15pt;
+            font-weight: 800;
+        }
+
+        // 24-hour trend graph (newest point on the right)
+        graph := Rectangle {
+            x: 12px;
+            y: 38px;
+            width: parent.width - 24px;
+            height: parent.height - 46px;
+
+            // Recessive gridlines (top, middle, baseline)
+            Rectangle { y: 0; width: 100%; height: 1px; background: #ffffff12; }
+            Rectangle { y: parent.height / 2; width: 100%; height: 1px; background: #ffffff12; }
+            Rectangle { y: parent.height - 1px; width: 100%; height: 1px; background: #ffffff1e; }
+
+            // Area fill under the curve, fading to transparent.
+            // The 600x100 viewbox matches the ~6:1 aspect ratio of this
+            // graph area (Slint scales a Path preserving the aspect ratio).
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: 600;
+                viewbox-height: 100;
+                fill: @linear-gradient(180deg, #3987e54d 0%, #3987e500 100%);
+                commands: data.history-fill;
+            }
+            // Temperature line
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: 600;
+                viewbox-height: 100;
+                stroke: Theme.series;
+                stroke-width: 2px;
+                commands: data.history-path;
             }
 
-            // Name and value container
-            VerticalBox {
-                min-width: 80px;
-                Text {
-                    text: data.name;
-                    color: white;
-                    font-size: 12pt;
-                }
-
-                // Instantaneous value in Celsius (last valid reading)
-                Text {
-                    text: data.value-text;
-                    color: data.ok ? white : #e74c3c;
-                    font-size: 12pt;
-                }
+            // Auto-scale bounds of the y axis
+            Text {
+                x: 4px;
+                y: 1px;
+                text: data.hist-max-text;
+                color: Theme.text-muted;
+                font-size: 9pt;
             }
-
-            // 24-hour trend graph
-            Rectangle {
-                background: black;
-                min-width: 150px;
-                Path {
-                    width: 100%;
-                    height: 100%;
-                    viewbox-width: 95;
-                    viewbox-height: 100;
-                    stroke: #3498db;
-                    stroke-width: 2px;
-                    commands: data.history-path;
-                }
-
-                // Auto-scale bounds of the graph
-                Text {
-                    text: data.hist-max-text;
-                    color: gray;
-                    font-size: 8pt;
-                    x: 2px;
-                    y: 0px;
-                }
-                Text {
-                    text: data.hist-min-text;
-                    color: gray;
-                    font-size: 8pt;
-                    x: 2px;
-                    y: parent.height - self.height;
-                }
+            Text {
+                x: 4px;
+                y: parent.height - self.height - 2px;
+                text: data.hist-min-text;
+                color: Theme.text-muted;
+                font-size: 9pt;
             }
         }
     }

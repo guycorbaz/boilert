@@ -15,6 +15,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const HISTORY_POINTS: usize = 96;
 /// Seconds between two history points (15 minutes).
 pub const POINT_INTERVAL_S: u64 = 15 * 60;
+/// Width of the SVG viewbox the graph is rendered into. Slint scales a Path
+/// viewbox preserving its aspect ratio, so this matches the ~6:1 aspect of
+/// the graph area in the sensor cards (height is 100).
+pub const GRAPH_VIEW_W: f32 = 600.0;
 
 /// Rolling buffer of temperature values for a single sensor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,17 +41,22 @@ impl SensorHistory {
         self.points.push(val);
     }
 
-    /// Maps the history to an SVG path for Slint's `Path` element, along with
-    /// the y-axis bounds `(path, min_temp, max_temp)` used for the scaling.
+    /// Maps the history to SVG paths for Slint's `Path` elements, auto-scaled
+    /// to the data.
     ///
-    /// The X axis ranges over 0..=95 (`HISTORY_POINTS - 1`). The Y axis is
-    /// auto-scaled to the data (with a margin and a minimum 5 °C span) and
-    /// mapped to the 0..100 viewbox, 0 being the hottest bound at the top.
+    /// The X axis spans 0..=[`GRAPH_VIEW_W`]. The Y axis is auto-scaled to
+    /// the data (with a margin and a minimum 5 °C span) and mapped to the
+    /// 0..100 viewbox, 0 being the hottest bound at the top.
     /// Gaps lift the pen, so sensor failures don't draw misleading lines.
-    pub fn svg_path(&self) -> (String, f32, f32) {
+    pub fn svg_graph(&self) -> SvgGraph {
         let valid: Vec<f32> = self.points.iter().flatten().copied().collect();
         if valid.is_empty() {
-            return (String::new(), 0.0, 100.0);
+            return SvgGraph {
+                line: String::new(),
+                fill: String::new(),
+                lo: 0.0,
+                hi: 100.0,
+            };
         }
         let min = valid.iter().copied().fold(f32::INFINITY, f32::min);
         let max = valid.iter().copied().fold(f32::NEG_INFINITY, f32::max);
@@ -61,21 +70,50 @@ impl SensorHistory {
             hi = center + 2.5;
         }
 
-        let mut path = String::new();
-        let mut pen_down = false;
+        // `line` traces the curve; `fill` closes each contiguous segment down
+        // to the baseline (y = 100) so the area under the curve can be filled.
+        let x_step = GRAPH_VIEW_W / (HISTORY_POINTS - 1) as f32;
+        let mut line = String::new();
+        let mut fill = String::new();
+        let mut segment_last: Option<f32> = None;
         for (i, point) in self.points.iter().enumerate() {
+            let x = i as f32 * x_step;
             match point {
                 Some(temp) => {
                     let y = ((hi - temp) / (hi - lo) * 100.0).clamp(0.0, 100.0);
-                    let cmd = if pen_down { 'L' } else { 'M' };
-                    path.push_str(&format!("{cmd} {i} {y:.1} "));
-                    pen_down = true;
+                    if segment_last.is_none() {
+                        line.push_str(&format!("M {x:.1} {y:.1} "));
+                        fill.push_str(&format!("M {x:.1} 100 L {x:.1} {y:.1} "));
+                    } else {
+                        line.push_str(&format!("L {x:.1} {y:.1} "));
+                        fill.push_str(&format!("L {x:.1} {y:.1} "));
+                    }
+                    segment_last = Some(x);
                 }
-                None => pen_down = false,
+                None => {
+                    if let Some(last) = segment_last.take() {
+                        fill.push_str(&format!("L {last:.1} 100 Z "));
+                    }
+                }
             }
         }
-        (path, lo, hi)
+        if let Some(last) = segment_last {
+            fill.push_str(&format!("L {last:.1} 100 Z "));
+        }
+        SvgGraph { line, fill, lo, hi }
     }
+}
+
+/// SVG paths and y-axis bounds of a history graph.
+pub struct SvgGraph {
+    /// Path commands of the temperature curve.
+    pub line: String,
+    /// Path commands of the closed area under the curve (for a gradient fill).
+    pub fill: String,
+    /// Lower bound of the auto-scaled y axis (°C).
+    pub lo: f32,
+    /// Upper bound of the auto-scaled y axis (°C).
+    pub hi: f32,
 }
 
 /// On-disk representation of the history of all sensors.
@@ -163,9 +201,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_history_gives_empty_path() {
-        let (path, _, _) = SensorHistory::new().svg_path();
-        assert!(path.is_empty());
+    fn empty_history_gives_empty_paths() {
+        let graph = SensorHistory::new().svg_graph();
+        assert!(graph.line.is_empty());
+        assert!(graph.fill.is_empty());
     }
 
     #[test]
@@ -173,10 +212,10 @@ mod tests {
         let mut history = SensorHistory::new();
         history.add_point(Some(50.0));
         history.add_point(Some(50.2));
-        let (path, lo, hi) = history.svg_path();
-        assert!(!path.is_empty());
-        assert!((hi - lo - 5.0).abs() < 1e-3);
-        assert!(lo < 50.0 && hi > 50.2);
+        let graph = history.svg_graph();
+        assert!(!graph.line.is_empty());
+        assert!((graph.hi - graph.lo - 5.0).abs() < 1e-3);
+        assert!(graph.lo < 50.0 && graph.hi > 50.2);
     }
 
     #[test]
@@ -187,9 +226,13 @@ mod tests {
         history.add_point(None);
         history.add_point(Some(42.0));
         history.add_point(Some(43.0));
-        let (path, _, _) = history.svg_path();
+        let graph = history.svg_graph();
         // Two separate sub-paths: one before the gap, one after.
-        assert_eq!(path.matches('M').count(), 2);
+        assert_eq!(graph.line.matches('M').count(), 2);
+        // The fill closes one area per contiguous segment.
+        assert_eq!(graph.fill.matches('Z').count(), 2);
+        // Each fill area starts and ends on the baseline (y = 100).
+        assert_eq!(graph.fill.matches("100 ").count(), 4);
     }
 
     #[test]

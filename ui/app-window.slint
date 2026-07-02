@@ -1,11 +1,11 @@
 import { DashboardPage, StatsPage, SensorData } from "pages.slint";
-import { PageStyle } from "styles.slint";
+import { Theme } from "styles.slint";
 
 // Main application window that coordinates pages and data
 export component AppWindow inherits Window {
     width: 800px;
     height: 480px;
-    background: black;
+    background: Theme.bg;
     title: "boilert";
 
     // Flag to control which page to display (0: Dashboard, 1: Statistics)
@@ -23,9 +23,14 @@ export component AppWindow inherits Window {
     // False when at least one sensor failed its last reading
     in property <bool> sensors-ok: true;
 
-    // Stratification colors computed from the top/bottom sensor temperatures
-    in property <color> boiler-top-color: #6e6e6e;
-    in property <color> boiler-bottom-color: #6e6e6e;
+    // Stratification colors interpolated by the backend from the measured
+    // temperatures: c0 = top of the tank (hottest), c5 = bottom (coldest)
+    in property <color> boiler-c0: #6e6e6e;
+    in property <color> boiler-c1: #6e6e6e;
+    in property <color> boiler-c2: #6e6e6e;
+    in property <color> boiler-c3: #6e6e6e;
+    in property <color> boiler-c4: #6e6e6e;
+    in property <color> boiler-c5: #6e6e6e;
 
     // Dynamic model containing data for all configured temperature sensors.
     // This model is populated and updated by the Rust backend loop.
@@ -35,13 +40,19 @@ export component AppWindow inherits Window {
     if (active-page == 0): DashboardPage {
         x: 0px;
         y: 0px;
-        width: parent.width - 1px * PageStyle.ext_padding;
-        height: parent.height - 1px * PageStyle.ext_padding;
+        width: parent.width;
+        height: parent.height;
         energy-text: root.energy-text;
         mqtt-connected: root.mqtt-connected;
         sensors-ok: root.sensors-ok;
-        boiler-top-color: root.boiler-top-color;
-        boiler-bottom-color: root.boiler-bottom-color;
+        top-temp-text: root.sensors.length > 0 ? root.sensors[0].value-text : "--";
+        bottom-temp-text: root.sensors.length > 0 ? root.sensors[root.sensors.length - 1].value-text : "--";
+        c0: root.boiler-c0;
+        c1: root.boiler-c1;
+        c2: root.boiler-c2;
+        c3: root.boiler-c3;
+        c4: root.boiler-c4;
+        c5: root.boiler-c5;
         show-stats => {
             active-page = 1;
         }
@@ -51,8 +62,8 @@ export component AppWindow inherits Window {
     if (active-page == 1): StatsPage {
         x: 0px;
         y: 0px;
-        width: parent.width - 1px * PageStyle.ext_padding;
-        height: parent.height - 1px * PageStyle.ext_padding;
+        width: parent.width;
+        height: parent.height;
         sensors: root.sensors;
 
         back => {
@@ -63,7 +74,7 @@ export component AppWindow inherits Window {
     // Version display at the bottom left
     Text {
         text: "v" + root.app-version;
-        color: lightgray;
+        color: Theme.text-muted;
         font-size: 10px;
         x: 10px;
         y: parent.height - self.height - 5px;

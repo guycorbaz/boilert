@@ -157,6 +157,39 @@ DS18B20 conversions take ~750 ms each, so all sensors are read **in parallel on 
 
 ---
 
+## Design & Engineering Notes
+
+This section documents the issues identified during the code review of v1.0.0 and how they were addressed.
+
+### Reliability issues fixed in v1.1.0
+
+- **Blocking sensor reads overran the tick.** Sensor files were read synchronously inside an async task; a DS18B20 conversion takes ~750 ms, so 6 sequential reads (~4.5 s) overran the 2 s loop and stalled the runtime. Sensors are now read **in parallel on blocking threads** (`spawn_blocking`), and missed ticks are delayed instead of bursting.
+- **A failed sensor polluted the measurements with 0.0.** A read error (CRC failure, unplugged probe) was recorded as 0 °C: published to MQTT as a real value, included in the average (collapsing the energy figure), and stored in the history. Failed readings are now excluded from the energy calculation, not published, and leave a gap in the history.
+- **No status feedback on the device.** Errors only went to stderr; on a wall-mounted kiosk nobody reads them. The UI now shows the MQTT connection state and a per-sensor failure indication.
+- **History was lost on restart and pre-filled with fake data.** The 24 h buffer was initialized with a single reading (a flat line for the first day) and wiped on every restart. It is now persisted to disk (atomic writes) and restored at startup, shifted by the downtime.
+- **Fixed 0-100 °C graph scale.** With a useful range of 20-65 °C, the curve used half the plot. Graphs are now auto-scaled with a margin and a minimum 5 °C span.
+
+### MQTT improvements (v1.1.0)
+
+- Retained publications, so consumers get the last value on connect.
+- Last will + availability topic (`{base_topic}/status`), so home automation can detect an outage.
+- Unique client id (two instances no longer evict each other), 30 s keep-alive, publications throttled by `publish_interval_s`, and non-blocking `try_publish` so an unreachable broker can never stall the measurement loop.
+
+### Operations (v1.1.0)
+
+- Config path as CLI argument, validation at load (1-6 sensors, positive volume/coefficient).
+- `tracing`-based logging controlled by `RUST_LOG`, systemd unit in `deploy/`.
+- Kiosk fullscreen option, realistic simulation (slow stratified random walk), unit tests.
+
+### UI overhaul (v1.2.0)
+
+- Modern dark theme centralized in a `Theme` global: dark surfaces with rounded cards, text tokens, recessive gridlines, and reserved status colors (green/amber/red) paired with icons or labels.
+- The boiler is now drawn as a vector tank filled with a **6-stop gradient interpolated from the measured sensor temperatures** — visually hot (red) at the top, cold (blue) at the bottom.
+- History graphs redesigned: blue series line with a fading area fill, auto-scale bound labels, gaps lift the pen. The SVG viewbox matches the plot's aspect ratio because Slint scales `Path` content preserving it.
+- Navigation buttons are large touch targets (180x58, 16pt) placed at the **exact same position on both screens**, and everything fits the 800x480 display with no overlap.
+
+---
+
 ## License
 
 MIT - See [LICENSE](LICENSE) for details.

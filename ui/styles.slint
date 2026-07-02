@@ -1,5 +1,54 @@
-// Global styles and constants used across multiple pages
-export global PageStyle {
-    // External padding (margins) for the main application pages
-    out property <int> ext_padding: 20;
+// Global theme (colors, sizes) and shared components used across pages.
+//
+// Colors follow the dataviz reference palette for dark surfaces:
+// - series (line charts): blue #3987e5
+// - status: good #0ca30c / warning #fab219 / critical #d03b3b
+// - text wears text tokens (primary/secondary/muted), never series colors.
+export global Theme {
+    // Surfaces
+    out property <color> bg: #121211;
+    out property <color> card: #1e1e1c;
+    out property <color> card-border: #32322e;
+    // Text tokens
+    out property <color> text-primary: #ffffff;
+    out property <color> text-secondary: #c3c2b7;
+    out property <color> text-muted: #8a897f;
+    // Data series (history graphs)
+    out property <color> series: #3987e5;
+    // Status colors (always paired with an icon or label, never alone)
+    out property <color> good: #0ca30c;
+    out property <color> warning: #fab219;
+    out property <color> critical: #d03b3b;
+    // Layout
+    out property <length> pad: 16px;
+    out property <length> radius: 14px;
+}
+
+// Large touch-friendly navigation button. Every page places it at the same
+// spot (bottom right, `Theme.pad` margins) so navigation never moves.
+export component NavButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+
+    width: 180px;
+    height: 58px;
+    border-radius: 16px;
+    background: touch.pressed ? #2a78d6 : #1c5cab;
+
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.text;
+        color: white;
+        font-size: 16pt;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
 }

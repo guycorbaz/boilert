@@ -1,14 +1,13 @@
-import { PageStyle } from "styles.slint";
-import { Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Theme, NavButton } from "styles.slint";
 import { Sensor, SensorData } from "sensor.slint";
 
 // One row of the two-column sensor grid: shows sensors `first` and
 // `first + 1` (the second one only if it exists).
-component SensorRow inherits HorizontalBox {
+component SensorRow inherits HorizontalLayout {
     in property <[SensorData]> sensors;
     in property <int> first;
 
-    spacing: 20px;
+    spacing: 12px;
 
     Sensor {
         data: root.sensors[root.first];
@@ -26,54 +25,48 @@ export component StatsPage {
     in property <[SensorData]> sensors;
 
     Rectangle {
-        background: black;
-        border-color: black;
-        border-width: 1px;
-        x: 1px * PageStyle.ext_padding;
-        y: 1px * PageStyle.ext_padding;
-        width: parent.width - 1px * PageStyle.ext_padding;
-        height: parent.height - 0px * PageStyle.ext_padding;
+        width: 100%;
+        height: 100%;
+        background: Theme.bg;
 
         // Page title
         Text {
-            y: 0;
-            text: "Statistiques de température";
-            color: white;
-            font-size: 20pt;
+            x: Theme.pad + 4px;
+            y: 14px;
+            text: "Températures";
+            color: Theme.text-primary;
+            font-size: 24pt;
             font-weight: 800;
         }
 
-        Rectangle {
-            y: 60px;
-            background: black;
+        // Two-column grid for up to 6 sensor cards. It stops above the
+        // navigation button so nothing ever overlaps it.
+        VerticalLayout {
+            x: Theme.pad;
+            y: 62px;
+            width: parent.width - 2 * Theme.pad;
+            height: 334px;
+            spacing: 10px;
 
-            // Two-column layout for up to 6 sensors (Slint's GridLayout
-            // doesn't support dynamic 'for' loops, so rows are explicit).
-            VerticalBox {
-                spacing: 20px;
-                padding: 0px;
-                if root.sensors.length > 0: SensorRow {
-                    sensors: root.sensors;
-                    first: 0;
-                }
-                if root.sensors.length > 2: SensorRow {
-                    sensors: root.sensors;
-                    first: 2;
-                }
-                if root.sensors.length > 4: SensorRow {
-                    sensors: root.sensors;
-                    first: 4;
-                }
+            if root.sensors.length > 0: SensorRow {
+                sensors: root.sensors;
+                first: 0;
+            }
+            if root.sensors.length > 2: SensorRow {
+                sensors: root.sensors;
+                first: 2;
+            }
+            if root.sensors.length > 4: SensorRow {
+                sensors: root.sensors;
+                first: 4;
             }
         }
 
-        // Back button
-        Button {
+        // Navigation button (same spot on every page)
+        NavButton {
+            x: parent.width - self.width - Theme.pad;
+            y: parent.height - self.height - Theme.pad;
             text: "Retour";
-            width: 120px;
-            height: 40px;
-            x: parent.width - self.width - 20px;
-            y: parent.height - self.height - 20px;
             clicked => {
                 root.back();
             }
