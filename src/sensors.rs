@@ -72,7 +72,7 @@ pub fn read_temperature(sensor_id: &str) -> Result<f32> {
 /// The first sensors queried (top of the tank) start hotter than the last ones.
 #[cfg(not(feature = "pi"))]
 pub fn read_temperature(sensor_id: &str) -> Result<f32> {
-    use rand::Rng;
+    use rand::RngExt;
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
 
