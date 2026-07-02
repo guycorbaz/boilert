@@ -1,6 +1,12 @@
 # boilert 🌡️
 
-`boilert` is a Water Boiler Monitoring application built with Rust and [Slint UI](https://slint.dev/). It monitors multiple 1-Wire temperature sensors, calculates stored energy, and publishes data to an MQTT broker.
+`boilert` is a Water Boiler Monitoring application built with Rust and [Slint UI](https://slint.dev/). It runs on a Raspberry Pi with the official 7" touchscreen (800x480), monitors 1 to 6 evenly spaced 1-Wire temperature sensors in a cylindrical hot water tank, calculates the stored thermal energy, and publishes everything to an MQTT broker.
+
+| Dashboard | Statistics |
+|-----------|------------|
+| ![Dashboard](docs/dashboard.png) | ![Statistics](docs/stats.png) |
+
+*Screenshots taken in simulation mode with demo data.*
 
 ## Features
 
@@ -8,10 +14,32 @@
 - **Energy Calculation**: Automatically calculates the thermal energy stored in your boiler (kWh), slice by slice, ignoring failed sensors.
 - **Stratification Display**: The boiler drawing is tinted with a 6-stop gradient interpolated from the measured temperatures (hot at the top, cold at the bottom).
 - **Energy History**: A 24-hour graph of the stored energy is shown below the total on the dashboard.
-- **Temperature History**: Displays an auto-scaled 24-hour history graph for each sensor (15-minute resolution), persisted across restarts.
+- **Temperature History**: An auto-scaled 24-hour graph for each sensor (15-minute resolution), persisted across restarts.
 - **MQTT Integration**: Publishes retained sensor data, energy metrics, and an availability topic (last will) to your home automation system.
 - **Status Indicators**: MQTT connection state and sensor failures are visible directly on the screen.
-- **Dual Mode**: Runs in simulation mode on workstations or high-precision mode on Raspberry Pi.
+- **Touch-friendly UI**: Borderless 800x480 window, large navigation buttons at the same position on every screen, optional fullscreen kiosk mode.
+- **Dual Mode**: Runs in simulation mode on workstations (no hardware needed) or reads real DS18B20 sensors on a Raspberry Pi.
+
+The user interface is documented in detail in [SLINT_UI.md](SLINT_UI.md).
+
+---
+
+## Project Structure
+
+```
+├── src/
+│   ├── main.rs        # Orchestration: sensor loop, MQTT, UI updates
+│   ├── config.rs      # TOML configuration loading and validation
+│   ├── sensors.rs     # DS18B20 reading (Pi) / simulation (workstation)
+│   ├── energy.rs      # Stored-energy calculation
+│   └── history.rs     # 24 h histories, persistence, SVG graph generation
+├── ui/                # Slint UI (see SLINT_UI.md)
+│   └── assets/        # boiler.svg drawing
+├── deploy/
+│   └── boilert.service  # Sample systemd unit
+├── config.toml        # Sample configuration
+└── build.rs           # Slint compilation
+```
 
 ---
 
@@ -20,8 +48,9 @@
 - **Rust Toolchain**: [Install Rust](https://www.rust-lang.org/learn/get-started).
 - **MQTT Broker**: Access to an MQTT broker (e.g., Mosquitto).
 - **Hardware (Optional)**:
-  - Raspberry Pi with 1-Wire interface enabled (`dtoverlay=w1-gpio`).
+  - Raspberry Pi with 1-Wire interface enabled (`dtoverlay=w1-gpio` in `/boot/config.txt`).
   - DS18B20 temperature sensors.
+  - Official 7" touchscreen (800x480) — the UI is designed for it but runs in a window on any desktop.
 
 ---
 
@@ -30,7 +59,7 @@
 ### 1. Clone the repository
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/guycorbaz/boilert.git
 cd boilert
 ```
 
@@ -42,7 +71,7 @@ To run with simulated data (useful for UI testing):
 cargo run
 ```
 
-The simulation produces a slow, stratified random walk per sensor so the graphs look realistic.
+The simulation produces a slow, stratified random walk per sensor (hotter at the top of the tank) so the display and graphs look realistic.
 
 ### 3. Raspberry Pi Mode
 
@@ -51,8 +80,10 @@ To build for real hardware, use the `pi` feature:
 ```bash
 cargo build --release --features pi
 # or run directly
-cargo run --features pi
+cargo run --release --features pi
 ```
+
+Note: the first build compiles Slint and can take a long time on a Raspberry Pi. On low-memory models, limit parallelism with `-j 2`.
 
 ### 4. Tests
 
@@ -68,31 +99,34 @@ cargo test
 boilert [path/to/config.toml]
 ```
 
-The configuration file defaults to `config.toml` in the current directory. Logging goes to stderr and is controlled with `RUST_LOG` (e.g. `RUST_LOG=debug`).
+- The configuration file defaults to `config.toml` in the current directory.
+- Logging goes to stderr and is controlled with `RUST_LOG` (e.g. `RUST_LOG=debug`).
+- The 24 h histories are persisted in the file set by `history_file` (relative paths are resolved against the working directory).
 
 ---
 
 ## Configuration
 
 ```toml
-# Persist the 24 h history across restarts (JSON)
+# Persist the 24 h histories across restarts (JSON)
 history_file = "boilert-history.json"
 
 [mqtt]
 host = "mqtt.home.arpa"
 port = 1883
 base_topic = "boilert/sensors"
-publish_interval_s = 30    # Seconds between MQTT publications
+publish_interval_s = 30    # Seconds between MQTT publications (default: 30)
 
 [boiler]
 volume_l = 500.0           # Total volume in Liters
 reference_temp_c = 15.0    # Baseline cold water temperature
-energy_coefficient = 1.162 # Wh/l·K (standard for water)
+energy_coefficient = 1.162 # Wh/(l·K) (standard for water)
 
 [ui]
 fullscreen = false         # true for kiosk mode on the touchscreen
 
 # Sensors are listed from the TOP of the tank to the BOTTOM (1 to 6 sensors).
+# On the Pi, find the ids with: ls /sys/bus/w1/devices/
 [[sensors]]
 name = "Top"
 id = "28-000000000001"     # 1-Wire device ID
@@ -102,13 +136,13 @@ name = "Bottom"
 id = "28-000000000002"
 ```
 
-The configuration is validated at startup (sensor count, positive volume and coefficient, ...).
+The configuration is validated at startup: 1 to 6 sensors, positive volume, coefficient and publish interval. `history_file`, `publish_interval_s` and the `[ui]` section are optional (the values above are the defaults).
 
 ---
 
 ## MQTT API
 
-The application publishes **retained** messages to the following topics every `publish_interval_s` seconds:
+The application publishes **retained** messages (QoS 1, client id `boilert-<pid>`) to the following topics every `publish_interval_s` seconds:
 
 | Topic | Description | Payload |
 |-------|-------------|---------|
@@ -116,13 +150,15 @@ The application publishes **retained** messages to the following topics every `p
 | `{base_topic}/energy` | Total energy stored in the boiler | `f32` (kWh, 3 decimals) |
 | `{base_topic}/status` | Availability (last will) | `online` / `offline` |
 
-A sensor that fails to read is *not* published (its last retained value stays on the broker), and the energy value is computed from the remaining valid sensors.
+- A sensor that fails to read is *not* published (its last retained value stays on the broker), and the energy value is computed from the remaining valid sensors.
+- `online` is published (retained) after each successful connection; `offline` is set by the broker through the last will when the connection drops.
+- An unreachable broker never blocks the measurement loop: publications are queued and dropped if the queue is full.
 
 ---
 
 ## Deployment on Raspberry Pi
 
-A sample systemd unit is provided in [`deploy/boilert.service`](deploy/boilert.service):
+A sample systemd unit is provided in [`deploy/boilert.service`](deploy/boilert.service). Adjust `User`, `WorkingDirectory` and `ExecStart` to your setup, then:
 
 ```bash
 sudo cp deploy/boilert.service /etc/systemd/system/
@@ -141,7 +177,7 @@ Set `fullscreen = true` in the `[ui]` section for kiosk mode on the official 7" 
 
 Each sensor represents an equal horizontal slice of the cylindrical tank (sensors evenly spaced along its height):
 
-`E (kWh) = Σ slices ( V/N (L) * max(0, Tᵢ - T_ref) (K) * 1.162 ) / 1000`
+`E (kWh) = Σ slices ( V/N (L) * max(0, Tᵢ - T_ref) (K) * energy_coefficient ) / 1000`
 
 Slices colder than `reference_temp_c` contribute zero rather than a negative amount. With all slices above the reference this reduces to the classic `V * ΔT_avg * 1.162 / 1000` formula.
 
@@ -152,15 +188,28 @@ DS18B20 conversions take ~750 ms each, so all sensors are read **in parallel on 
 ### History
 
 - **Resolution**: 1 point every 15 minutes.
-- **Capacity**: 96 points (24 hours).
-- **Persistence**: Saved to `history_file` after each point and restored at startup, shifted by the downtime.
-- **Visualization**: Auto-scaled SVG paths (minimum 5 °C span) rendered by the Slint UI; gaps lift the pen.
+- **Capacity**: 96 points (24 hours), per sensor plus one buffer for the stored energy.
+- **Persistence**: Saved atomically to `history_file` after each point and restored at startup, shifted by the downtime. History files written by older versions (without the energy buffer) are still accepted.
+- **Visualization**: Auto-scaled SVG paths (minimum span: 5 °C for temperatures, 2 kWh for energy) rendered by the Slint UI; gaps lift the pen.
 
 ---
 
 ## Design & Engineering Notes
 
-This section documents the issues identified during the code review of v1.0.0 and how they were addressed.
+This section documents, release by release (most recent first), the issues identified during the review of v1.0.0 and how they were addressed.
+
+### UI refinements (v1.3.0)
+
+- **Borderless window** (`no-frame`): the title bar no longer pushes the buttons off the 800x480 panel.
+- **Boiler drawing restored**: back to the hand-drawn SVG (with its pipes), tinted with the measured 6-stop stratification gradient. The temperature→color ramp is now a "coolwarm" scale (blue → pale blue → amber → red) instead of a direct blue→red interpolation that produced muddy purples.
+- **Stored-energy history graph**: a 24 h auto-scaled graph below the total in the energy card, persisted like the sensor histories.
+
+### UI overhaul (v1.2.0)
+
+- Modern dark theme centralized in a `Theme` global: dark surfaces with rounded cards, text tokens, recessive gridlines, and reserved status colors (green/amber/red) paired with icons or labels.
+- The boiler was drawn as a vector tank with a **6-stop gradient interpolated from the measured sensor temperatures** (replaced by the tinted SVG drawing in v1.3.0).
+- History graphs redesigned: blue series line with a fading area fill, auto-scale bound labels, gaps lift the pen. The SVG viewbox matches the plot's aspect ratio because Slint scales `Path` content preserving it.
+- Navigation buttons are large touch targets (180x58, 16pt) placed at the **exact same position on both screens**, and everything fits the 800x480 display with no overlap.
 
 ### Reliability issues fixed in v1.1.0
 
@@ -181,19 +230,7 @@ This section documents the issues identified during the code review of v1.0.0 an
 - Config path as CLI argument, validation at load (1-6 sensors, positive volume/coefficient).
 - `tracing`-based logging controlled by `RUST_LOG`, systemd unit in `deploy/`.
 - Kiosk fullscreen option, realistic simulation (slow stratified random walk), unit tests.
-
-### UI refinements (v1.3.0)
-
-- **Borderless window** (`no-frame`): the title bar no longer pushes the buttons off the 800x480 panel.
-- **Boiler drawing restored**: back to the hand-drawn SVG (with its pipes), tinted with the measured 6-stop stratification gradient. The temperature→color ramp is now a "coolwarm" scale (blue → pale blue → amber → red) instead of a direct blue→red interpolation that produced muddy purples.
-- **Stored-energy history graph**: a 24 h auto-scaled graph below the total in the energy card, persisted like the sensor histories (older history files without it are still accepted).
-
-### UI overhaul (v1.2.0)
-
-- Modern dark theme centralized in a `Theme` global: dark surfaces with rounded cards, text tokens, recessive gridlines, and reserved status colors (green/amber/red) paired with icons or labels.
-- The boiler is now drawn as a vector tank filled with a **6-stop gradient interpolated from the measured sensor temperatures** — visually hot (red) at the top, cold (blue) at the bottom.
-- History graphs redesigned: blue series line with a fading area fill, auto-scale bound labels, gaps lift the pen. The SVG viewbox matches the plot's aspect ratio because Slint scales `Path` content preserving it.
-- Navigation buttons are large touch targets (180x58, 16pt) placed at the **exact same position on both screens**, and everything fits the 800x480 display with no overlap.
+- All dependencies updated to their latest versions; `Cargo.lock` tracked for reproducible builds.
 
 ---
 
