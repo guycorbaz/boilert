@@ -4,7 +4,7 @@ This document describes the user interface of the BoilerT application, implement
 
 ## Overview
 
-The interface is designed for an 800x480 screen (standard for small touch displays) and manages the display of boiler status and temperature sensor data.
+The interface is designed for an 800x480 screen (standard for small touch displays) and manages the display of boiler status and temperature sensor data. An optional kiosk mode (`[ui] fullscreen = true` in `config.toml`) makes the window fullscreen.
 
 ### Component Hierarchy
 
@@ -13,7 +13,8 @@ graph TD
     AW[AppWindow] --> DP[DashboardPage]
     AW --> SP[StatsPage]
     DP --> B[Boiler]
-    SP --> S[Sensor]
+    SP --> SR[SensorRow]
+    SR --> S[Sensor]
     S --> T[Thermometre]
 ```
 
@@ -25,21 +26,20 @@ The main entry point of the UI. It manages top-level state and page navigation.
 
 - **`AppWindow`**: Inherits from `Window`.
   - `active-page`: Controls which page is displayed (0 for Dashboard, 1 for Stats).
-  - `energy_kwh`: Total energy stored in the boiler.
-  - `sensors`: A model of `SensorData` containing name, current value, and history path for each configured thermometer (1-6).
-
-- **`SensorData`**: A struct containing:
-  - `name`: string
-  - `value`: float
-  - `history_path`: string
+  - `energy-text`: Pre-formatted total energy stored in the boiler (kWh).
+  - `mqtt-connected`: True while the MQTT broker connection is up.
+  - `sensors-ok`: False when at least one sensor failed its last reading.
+  - `boiler-top-color` / `boiler-bottom-color`: Stratification colors computed by the backend from the top/bottom sensor temperatures.
+  - `sensors`: A model of `SensorData` for each configured thermometer (1-6).
 
 ### [dashboard.slint](ui/dashboard.slint)
 
 The default landing page.
 
 - **`DashboardPage`**:
-  - Displays a visual representation of the boiler using the `Boiler` component.
+  - Displays a visual representation of the boiler using the `Boiler` component, tinted with the measured stratification gradient.
   - Shows the calculated energy stored in kWh.
+  - Shows an MQTT connection indicator (green/red dot) and a sensor failure warning.
   - Contains a "Stat" button to navigate to the statistics page.
 
 ### [stats.slint](ui/stats.slint)
@@ -47,27 +47,31 @@ The default landing page.
 Displays detailed temperature data from all sensors.
 
 - **`StatsPage`**:
-  - Dynamically displays `Sensor` components based on the `sensors` model.
-  - Arranges sensors in a **two-column layout** using nested `HorizontalBox`es.
+  - Arranges sensors in a **two-column layout** using the `SensorRow` helper component (up to 3 rows).
   - Provides a "Retour" (Back) button to return to the dashboard.
+- **`SensorRow`**: One row of the grid, showing sensors `first` and `first + 1` (the second only if present).
 
-### [sensot.slint](ui/sensot.slint)
+### [sensor.slint](ui/sensor.slint)
 
 A reusable component to display individual sensor data.
 
+- **`SensorData`**: A struct containing:
+  - `name`: string
+  - `value-text`: pre-formatted current value (e.g. `"54.3 °C"`, or `"--"` when unknown)
+  - `ok`: false when the last reading failed
+  - `history-path`: SVG path commands for the auto-scaled 24-hour trend line
+  - `hist-min-text` / `hist-max-text`: labels of the auto-scaled y-axis bounds
 - **`Sensor`**:
   - Shows a thermometer icon (`Thermometre` component).
-  - Displays the sensor name and current value in Celsius.
-  - Displays a blue line chart showing 24-hour temperature history on a black background.
-  - `history_path`: Property containing the SVG path for the trend line.
+  - Displays the sensor name and last valid value in Celsius (in red, with a red border, when the sensor is failing).
+  - Displays a line chart showing the 24-hour temperature history with its scale bounds; gaps in the data lift the pen.
 
 ### [boiler.slint](ui/boiler.slint)
 
 Visual representation of the hot water tank.
 
 - **`Boiler`**:
-  - Renders `assets/boiler.svg`.
-  - Properties for `top-color` and `bottom-color` (currently using default values).
+  - Renders `assets/boiler.svg`, colorized with a vertical gradient from `top-color` to `bottom-color` (the measured stratification).
 
 ### [thermometre.slint](ui/thermometre.slint)
 
@@ -83,7 +87,7 @@ Global styling properties.
 
 ### [pages.slint](ui/pages.slint)
 
-A helper file that exports all major pages for easier importing in `app-window.slint`.
+A helper file that exports all major pages (and `SensorData`) for easier importing in `app-window.slint`.
 
 ## Navigation Flow
 

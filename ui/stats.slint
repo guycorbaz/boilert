@@ -1,11 +1,22 @@
 import { PageStyle } from "styles.slint";
 import { Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
-import { Sensor } from "sensot.slint";
+import { Sensor, SensorData } from "sensor.slint";
 
-export struct SensorData {
-    name: string,
-    value: float,
-    history_path: string,
+// One row of the two-column sensor grid: shows sensors `first` and
+// `first + 1` (the second one only if it exists).
+component SensorRow inherits HorizontalBox {
+    in property <[SensorData]> sensors;
+    in property <int> first;
+
+    spacing: 20px;
+
+    Sensor {
+        data: root.sensors[root.first];
+    }
+
+    if root.sensors.length > root.first + 1: Sensor {
+        data: root.sensors[root.first + 1];
+    }
 }
 
 export component StatsPage {
@@ -36,61 +47,27 @@ export component StatsPage {
             y: 60px;
             background: black;
 
-            // Container for the dynamic sensor list.
-            // We use a combination of VerticalBox and HorizontalBox to achieve a 
-            // two-column layout, as Slint's GridLayout doesn't currently support 
-            // dynamic 'for' loops for rows and columns.
+            // Two-column layout for up to 6 sensors (Slint's GridLayout
+            // doesn't support dynamic 'for' loops, so rows are explicit).
             VerticalBox {
                 spacing: 20px;
                 padding: 0px;
-                // Row 1: Sensors 1 and 2
-                if root.sensors.length > 0: HorizontalBox {
-                    spacing: 20px;
-                    Sensor {
-                        name: root.sensors[0].name;
-                        value: root.sensors[0].value;
-                        history_path: root.sensors[0].history_path;
-                    }
-
-                    if root.sensors.length > 1: Sensor {
-                        name: root.sensors[1].name;
-                        value: root.sensors[1].value;
-                        history_path: root.sensors[1].history_path;
-                    }
+                if root.sensors.length > 0: SensorRow {
+                    sensors: root.sensors;
+                    first: 0;
                 }
-                // Row 2: Sensors 3 and 4
-                if root.sensors.length > 2: HorizontalBox {
-                    spacing: 20px;
-                    Sensor {
-                        name: root.sensors[2].name;
-                        value: root.sensors[2].value;
-                        history_path: root.sensors[2].history_path;
-                    }
-
-                    if root.sensors.length > 3: Sensor {
-                        name: root.sensors[3].name;
-                        value: root.sensors[3].value;
-                        history_path: root.sensors[3].history_path;
-                    }
+                if root.sensors.length > 2: SensorRow {
+                    sensors: root.sensors;
+                    first: 2;
                 }
-                // Row 3: Sensors 5 and 6
-                if root.sensors.length > 4: HorizontalBox {
-                    spacing: 20px;
-                    Sensor {
-                        name: root.sensors[4].name;
-                        value: root.sensors[4].value;
-                        history_path: root.sensors[4].history_path;
-                    }
-
-                    if root.sensors.length > 5: Sensor {
-                        name: root.sensors[5].name;
-                        value: root.sensors[5].value;
-                        history_path: root.sensors[5].history_path;
-                    }
+                if root.sensors.length > 4: SensorRow {
+                    sensors: root.sensors;
+                    first: 4;
                 }
             }
         }
-       // Back button
+
+        // Back button
         Button {
             text: "Retour";
             width: 120px;

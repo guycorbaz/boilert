@@ -1,8 +1,8 @@
 // Component representing the boiler (hot water tank)
 export component Boiler {
-    // Color for the top of the boiler representation
+    // Color at the top of the tank (hottest water)
     in property <color> top-color: red;
-    // Color for the bottom of the boiler representation
+    // Color at the bottom of the tank (coldest water)
     in property <color> bottom-color: blue;
 
     Rectangle {
@@ -12,8 +12,8 @@ export component Boiler {
             source: @image-url("assets/boiler.svg");
             width: parent.width;
             height: parent.height;
-            // Note: colorize is disabled for now, using the original SVG colors
-            //colorize: @linear-gradient(0deg, bottom-color 0%, top-color 100%);
+            // Tint the silhouette with the measured stratification gradient
+            colorize: @linear-gradient(180deg, root.top-color 0%, root.bottom-color 100%);
         }
     }
 }

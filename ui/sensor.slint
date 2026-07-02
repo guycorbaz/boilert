@@ -1,0 +1,82 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Thermometre } from "thermometre.slint";
+
+// Display data for one temperature sensor, prepared by the Rust backend.
+export struct SensorData {
+    name: string,
+    // Pre-formatted current value (e.g. "54.3 °C", or "--" when unknown)
+    value-text: string,
+    // False when the last reading failed (sensor unplugged, CRC error, ...)
+    ok: bool,
+    // SVG path commands for the 24-hour history graph (auto-scaled)
+    history-path: string,
+    // Labels of the auto-scaled y-axis bounds of the history graph
+    hist-min-text: string,
+    hist-max-text: string,
+}
+
+// Component to display a single temperature sensor's data
+export component Sensor {
+    in property <SensorData> data;
+
+    Rectangle {
+        // A failing sensor gets a red border so it is visible at a glance
+        border-color: data.ok ? gray : #e74c3c;
+        border-width: 1px;
+        HorizontalBox {
+            // Visual indicator
+            Thermometre {
+                height: 60px;
+                width: 40px;
+            }
+
+            // Name and value container
+            VerticalBox {
+                min-width: 80px;
+                Text {
+                    text: data.name;
+                    color: white;
+                    font-size: 12pt;
+                }
+
+                // Instantaneous value in Celsius (last valid reading)
+                Text {
+                    text: data.value-text;
+                    color: data.ok ? white : #e74c3c;
+                    font-size: 12pt;
+                }
+            }
+
+            // 24-hour trend graph
+            Rectangle {
+                background: black;
+                min-width: 150px;
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: 95;
+                    viewbox-height: 100;
+                    stroke: #3498db;
+                    stroke-width: 2px;
+                    commands: data.history-path;
+                }
+
+                // Auto-scale bounds of the graph
+                Text {
+                    text: data.hist-max-text;
+                    color: gray;
+                    font-size: 8pt;
+                    x: 2px;
+                    y: 0px;
+                }
+                Text {
+                    text: data.hist-min-text;
+                    color: gray;
+                    font-size: 8pt;
+                    x: 2px;
+                    y: parent.height - self.height;
+                }
+            }
+        }
+    }
+}

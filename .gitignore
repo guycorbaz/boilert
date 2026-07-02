@@ -13,3 +13,7 @@ Thumbs.db
 
 # sensitive config (if applicable)
 # config.toml
+
+# persisted temperature history
+boilert-history.json
+boilert-history.json.tmp

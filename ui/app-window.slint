@@ -1,4 +1,3 @@
-import { Button } from "std-widgets.slint";
 import { DashboardPage, StatsPage, SensorData } from "pages.slint";
 import { PageStyle } from "styles.slint";
 
@@ -7,26 +6,30 @@ export component AppWindow inherits Window {
     width: 800px;
     height: 480px;
     background: black;
+    title: "boilert";
 
     // Flag to control which page to display (0: Dashboard, 1: Statistics)
     property <int> active-page: 0;
-    
-    // Total thermal energy stored (kWh), calculated in the Rust backend
-    in property <float> energy_kwh: 0.0;
-    
+
+    // Pre-formatted total thermal energy stored (kWh), from the Rust backend
+    in property <string> energy-text: "-.-";
+
     // SemVer compatible application version string
     in property <string> app-version: "0.0.0";
 
+    // True while the MQTT broker connection is up
+    in property <bool> mqtt-connected: false;
+
+    // False when at least one sensor failed its last reading
+    in property <bool> sensors-ok: true;
+
+    // Stratification colors computed from the top/bottom sensor temperatures
+    in property <color> boiler-top-color: #6e6e6e;
+    in property <color> boiler-bottom-color: #6e6e6e;
+
     // Dynamic model containing data for all configured temperature sensors.
     // This model is populated and updated by the Rust backend loop.
-    in property <[SensorData]> sensors: [
-        { name: "S1", value: 0.0, history_path: "" },
-        { name: "S2", value: 0.0, history_path: "" },
-        { name: "S3", value: 0.0, history_path: "" },
-        { name: "S4", value: 0.0, history_path: "" },
-        { name: "S5", value: 0.0, history_path: "" },
-        { name: "S6", value: 0.0, history_path: "" },
-    ];
+    in property <[SensorData]> sensors;
 
     // Page: Dashboard
     if (active-page == 0): DashboardPage {
@@ -34,7 +37,11 @@ export component AppWindow inherits Window {
         y: 0px;
         width: parent.width - 1px * PageStyle.ext_padding;
         height: parent.height - 1px * PageStyle.ext_padding;
-        energy_kwh: root.energy_kwh;
+        energy-text: root.energy-text;
+        mqtt-connected: root.mqtt-connected;
+        sensors-ok: root.sensors-ok;
+        boiler-top-color: root.boiler-top-color;
+        boiler-bottom-color: root.boiler-bottom-color;
         show-stats => {
             active-page = 1;
         }

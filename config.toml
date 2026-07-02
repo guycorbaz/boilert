@@ -1,15 +1,27 @@
-# Temperature Sensor Configuration
-# Add your 6 sensors here
+# boilert configuration
+#
+# Sensors must be listed from the TOP of the tank to the BOTTOM:
+# the first [[sensors]] entry is the highest probe. Between 1 and 6
+# sensors are supported.
+
+# File used to persist the 24 h temperature history across restarts
+history_file = "boilert-history.json"
 
 [mqtt]
 host = "mqtt.home.arpa"
 port = 1883
 base_topic = "boilert/sensors"
+# Seconds between two MQTT publications (values are published retained)
+publish_interval_s = 30
 
 [boiler]
 volume_l = 500.0
 reference_temp_c = 15.0
-energy_coefficient = 1.162 # Wh/l·K
+energy_coefficient = 1.162 # Wh/(l·K), standard for water
+
+[ui]
+# Set to true for kiosk mode on the Raspberry Pi touchscreen
+fullscreen = false
 
 [[sensors]]
 name = "T1"

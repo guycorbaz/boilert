@@ -1,0 +1,28 @@
+# systemd unit for running boilert on a Raspberry Pi with a desktop session.
+#
+# Install:
+#   sudo cp deploy/boilert.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now boilert
+#
+# Logs: journalctl -u boilert -f
+
+[Unit]
+Description=boilert - water boiler heat monitor
+After=network-online.target graphical.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+# Directory containing config.toml and the persisted history file
+WorkingDirectory=/home/pi/boilert
+ExecStart=/home/pi/boilert/boilert /home/pi/boilert/config.toml
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+# Required to open a window on the local X/Wayland session
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=graphical.target

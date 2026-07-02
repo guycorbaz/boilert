@@ -2,175 +2,286 @@
 //! Orchestrates sensor reading, MQTT publishing, and Slint UI updates.
 
 mod config;
+mod energy;
+mod history;
 mod sensors;
 
 use std::error::Error;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
 use slint::ComponentHandle;
-use std::time::Duration;
-use tokio::time;
+use tokio::time::{self, MissedTickBehavior};
+use tracing::{error, info, warn};
 
 slint::include_modules!();
 
-// --- History Management ---
-// We store 24 hours of data with 15-minute resolution.
-const HISTORY_POINTS: usize = 96; // 24 hours * 4 points/hour
+/// Interval between sensor readings and UI refreshes.
+const READ_INTERVAL: Duration = Duration::from_secs(2);
+/// Interval between two history points (15-minute resolution).
+const HISTORY_INTERVAL: Duration = Duration::from_secs(history::POINT_INTERVAL_S);
 
-/// Buffer to store historical temperature data for a single sensor.
-struct SensorHistory {
-    /// Circular-like buffer of temperature values.
-    points: Vec<f32>,
-    /// Last time a point was added to the history.
-    last_update: std::time::Instant,
+/// Maps a water temperature to a display color: blue at 15 °C, red at 65 °C.
+fn temp_to_color(temp: f32) -> slint::Color {
+    let f = ((temp - 15.0) / 50.0).clamp(0.0, 1.0);
+    let lerp = |a: f32, b: f32| (a + (b - a) * f).round() as u8;
+    slint::Color::from_rgb_u8(lerp(40.0, 220.0), lerp(90.0, 50.0), lerp(220.0, 40.0))
 }
 
-impl SensorHistory {
-    fn new(initial_val: f32) -> Self {
-        Self {
-            points: vec![initial_val; HISTORY_POINTS],
-            last_update: std::time::Instant::now(),
-        }
-    }
-
-    fn add_point(&mut self, val: f32) {
-        self.points.remove(0);
-        self.points.push(val);
-        self.last_update = std::time::Instant::now();
-    }
-
-    /// Maps the temperature data points to an SVG path string for Slint's Path element.
-    /// 
-    /// The X axis ranges from 0 to 95 (HISTORY_POINTS - 1).
-    /// The Y axis ranges from 0 (mapped to 100°C) to 100 (mapped to 0°C).
-    fn to_svg_path(&self) -> String {
-        let mut path = String::new();
-        for (i, &temp) in self.points.iter().enumerate() {
-            let x = i as f32;
-            // Map 100°C to 0 (top of the graph) and 0°C to 100 (bottom of the graph).
-            let y = (100.0 - temp).clamp(0.0, 100.0);
-            if i == 0 {
-                path.push_str(&format!("M {} {} ", x, y));
-            } else {
-                path.push_str(&format!("L {} {} ", x, y));
-            }
-        }
-        path
+/// Color for a possibly-unknown temperature (gray when no reading yet).
+fn color_for(temp: Option<f32>) -> slint::Color {
+    match temp {
+        Some(t) => temp_to_color(t),
+        None => slint::Color::from_rgb_u8(110, 110, 110),
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
+    // The configuration file path can be given as the first CLI argument
+    // (useful for systemd deployments); defaults to ./config.toml.
+    let config_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "config.toml".to_string());
+    let config = config::Config::load(std::path::Path::new(&config_path))?;
+    info!(
+        "Configuration loaded from {config_path} ({} sensors)",
+        config.sensors.len()
+    );
+
     // Initialize the Slint window
     let ui = AppWindow::new()?;
     let ui_weak = ui.as_weak();
 
-    // Load configuration from config.toml
-    let config = config::Config::load()?;
-    
     // Set application version from Cargo.toml
     ui.set_app_version(env!("CARGO_PKG_VERSION").into());
-    
-    // MQTT Setup
-    let mut mqttoptions = rumqttc::MqttOptions::new("boilert", &config.mqtt.host, config.mqtt.port);
-    mqttoptions.set_keep_alive(Duration::from_secs(5));
+    if config.ui.fullscreen {
+        ui.window().set_fullscreen(true);
+    }
 
-    let (client, mut eventloop) = rumqttc::AsyncClient::new(mqttoptions, 10);
-    
-    tokio::spawn(async move {
-        loop {
-            if let Err(e) = eventloop.poll().await {
-                eprintln!("MQTT connection error: {}", e);
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            }
-        }
-    });
-
-    // Initial UI setup
-    let mut initial_sensors = Vec::new();
-    for sensor in &config.sensors {
-        initial_sensors.push(SensorData {
-            name: sensor.name.clone().into(),
-            value: 0.0,
+    // Initial sensor model so the UI shows the configured names before the
+    // first reading completes.
+    let initial: Vec<SensorData> = config
+        .sensors
+        .iter()
+        .map(|s| SensorData {
+            name: s.name.clone().into(),
+            value_text: "--".into(),
+            ok: true,
             history_path: "".into(),
+            hist_min_text: "".into(),
+            hist_max_text: "".into(),
+        })
+        .collect();
+    ui.set_sensors(slint::ModelRc::from(initial.as_slice()));
+
+    // --- MQTT setup ---
+    let status_topic = format!("{}/status", config.mqtt.base_topic);
+    // Unique client id so two instances don't evict each other from the broker.
+    let client_id = format!("boilert-{}", std::process::id());
+    let mut mqttoptions = rumqttc::MqttOptions::new(client_id, &config.mqtt.host, config.mqtt.port);
+    mqttoptions.set_keep_alive(Duration::from_secs(30));
+    // Last will: the broker marks the device offline if the connection drops.
+    mqttoptions.set_last_will(rumqttc::LastWill::new(
+        &status_topic,
+        "offline",
+        rumqttc::QoS::AtLeastOnce,
+        true,
+    ));
+
+    let (client, mut eventloop) = rumqttc::AsyncClient::new(mqttoptions, 64);
+    let mqtt_connected = Arc::new(AtomicBool::new(false));
+
+    // MQTT event loop task: drives the connection, tracks its state, and
+    // announces availability on the status topic after each (re)connection.
+    {
+        let client = client.clone();
+        let connected = mqtt_connected.clone();
+        let status_topic = status_topic.clone();
+        tokio::spawn(async move {
+            loop {
+                match eventloop.poll().await {
+                    Ok(rumqttc::Event::Incoming(rumqttc::Packet::ConnAck(_))) => {
+                        info!("Connected to MQTT broker");
+                        connected.store(true, Ordering::Relaxed);
+                        let _ = client
+                            .publish(
+                                status_topic.as_str(),
+                                rumqttc::QoS::AtLeastOnce,
+                                true,
+                                "online",
+                            )
+                            .await;
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        // Only log the transition to avoid flooding the journal.
+                        if mqtt_was_connected(&connected) {
+                            warn!("MQTT connection lost: {e}");
+                        }
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
+                }
+            }
         });
     }
-    ui.set_sensors(slint::ModelRc::from(initial_sensors.as_slice()));
 
-    // Initialize history with current sensor values (read once)
-    let mut history: Vec<SensorHistory> = Vec::new();
-    for sensor in &config.sensors {
-        let val = sensors::read_temperature(&sensor.id).unwrap_or(20.0);
-        history.push(SensorHistory::new(val));
-    }
-
-    // Spawn the main sensor reading and UI update loop
+    // --- Main sensor reading / publishing / UI update loop ---
     let sensor_config = config.clone();
+    let connected = mqtt_connected.clone();
     tokio::spawn(async move {
-        let mut interval = time::interval(Duration::from_secs(2));
-        let mut last_history_update = std::time::Instant::now();
-        let history_update_interval = Duration::from_secs(15 * 60); // 15 minutes
+        let sensor_count = sensor_config.sensors.len();
+        let mut interval = time::interval(READ_INTERVAL);
+        // Sensor reads can be slow; don't try to catch up on missed ticks.
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        // 24 h history, restored from disk when available.
+        let mut hist = history::load_or_new(&sensor_config.history_file, sensor_count);
+        let mut last_history_update = Instant::now();
+
+        let publish_interval = Duration::from_secs(sensor_config.mqtt.publish_interval_s);
+        let mut last_publish: Option<Instant> = None;
+
+        // Last valid reading per sensor, kept for display when a read fails.
+        let mut last_valid: Vec<Option<f32>> = vec![None; sensor_count];
+        let mut last_energy: Option<f32> = None;
 
         loop {
             interval.tick().await;
-            
-            let mut temps = Vec::new();
-            for sensor in &sensor_config.sensors {
-                let temp = match sensors::read_temperature(&sensor.id) {
-                    Ok(temp) => temp,
+
+            // Read all sensors in parallel on blocking threads: a DS18B20
+            // conversion takes ~750 ms, so sequential reads of 6 sensors
+            // would overrun the 2 s tick and stall the async runtime.
+            let handles: Vec<_> = sensor_config
+                .sensors
+                .iter()
+                .map(|s| {
+                    let id = s.id.clone();
+                    tokio::task::spawn_blocking(move || sensors::read_temperature(&id))
+                })
+                .collect();
+
+            let mut readings: Vec<Option<f32>> = Vec::with_capacity(sensor_count);
+            for (handle, sensor) in handles.into_iter().zip(&sensor_config.sensors) {
+                let reading = match handle.await {
+                    Ok(Ok(temp)) => Some(temp),
+                    Ok(Err(e)) => {
+                        warn!("Error reading sensor {}: {e:#}", sensor.name);
+                        None
+                    }
                     Err(e) => {
-                        eprintln!("Error reading sensor {}: {}", sensor.name, e);
-                        0.0
+                        error!("Sensor read task failed for {}: {e}", sensor.name);
+                        None
                     }
                 };
-                temps.push(temp);
-
-                let topic = format!("{}/{}", sensor_config.mqtt.base_topic, sensor.name);
-                let payload = temp.to_string();
-                let _ = client.publish(topic, rumqttc::QoS::AtLeastOnce, false, payload).await;
+                readings.push(reading);
+            }
+            for (last, reading) in last_valid.iter_mut().zip(&readings) {
+                if reading.is_some() {
+                    *last = *reading;
+                }
             }
 
-            // Update history every 15 minutes
-            let now = std::time::Instant::now();
-            let update_history = now.duration_since(last_history_update) >= history_update_interval;
-            if update_history {
-                for (i, &temp) in temps.iter().enumerate() {
-                    if i < history.len() {
-                        history[i].add_point(temp);
-                    }
+            // Energy is computed from the sensors that answered this tick,
+            // so a failed sensor no longer drags the average down to 0 °C.
+            let valid: Vec<f32> = readings.iter().flatten().copied().collect();
+            let energy_now = energy::stored_energy_kwh(&valid, &sensor_config.boiler);
+            if energy_now.is_some() {
+                last_energy = energy_now;
+            }
+
+            // History point every 15 minutes (a failed sensor leaves a gap),
+            // persisted so a restart doesn't wipe the graphs.
+            let now = Instant::now();
+            if now.duration_since(last_history_update) >= HISTORY_INTERVAL {
+                for (sensor_history, reading) in hist.iter_mut().zip(&readings) {
+                    sensor_history.add_point(*reading);
                 }
                 last_history_update = now;
+                if let Err(e) = history::save(&sensor_config.history_file, &hist) {
+                    warn!(
+                        "Failed to persist history to {}: {e:#}",
+                        sensor_config.history_file
+                    );
+                }
             }
 
-            // Calculate the total thermal energy stored in the boiler (kWh).
-            // Formula: E = (m * cp * delta_T) / 3600
-            // Here: volume * energy_coefficient * (avg_temp - reference_temp) / 1000
-            let avg_temp: f32 = if temps.is_empty() { 0.0 } else { temps.iter().sum::<f32>() / temps.len() as f32 };
-            let delta_t = (avg_temp - sensor_config.boiler.reference_temp_c).max(0.0);
-            let energy_kwh = (sensor_config.boiler.volume_l * delta_t * sensor_config.boiler.energy_coefficient) / 1000.0;
+            // Throttled, retained MQTT publishes. try_publish never blocks
+            // the loop when the broker is unreachable and the queue fills up.
+            if last_publish.is_none_or(|t| now.duration_since(t) >= publish_interval) {
+                last_publish = Some(now);
+                for (sensor, reading) in sensor_config.sensors.iter().zip(&readings) {
+                    if let Some(temp) = reading {
+                        let topic = format!("{}/{}", sensor_config.mqtt.base_topic, sensor.name);
+                        let _ = client.try_publish(
+                            topic,
+                            rumqttc::QoS::AtLeastOnce,
+                            true,
+                            format!("{temp:.2}"),
+                        );
+                    }
+                }
+                if let Some(energy_kwh) = energy_now {
+                    let topic = format!("{}/energy", sensor_config.mqtt.base_topic);
+                    let _ = client.try_publish(
+                        topic,
+                        rumqttc::QoS::AtLeastOnce,
+                        true,
+                        format!("{energy_kwh:.3}"),
+                    );
+                }
+            }
 
-            // Publish the total energy to a dedicated MQTT topic
-            let energy_topic = format!("{}/energy", sensor_config.mqtt.base_topic);
-            let _ = client.publish(energy_topic, rumqttc::QoS::AtLeastOnce, false, energy_kwh.to_string()).await;
+            // Prepare display data off the UI thread.
+            let mut rows: Vec<SensorData> = Vec::with_capacity(sensor_count);
+            for i in 0..sensor_count {
+                let (path, lo, hi) = hist[i].svg_path();
+                let (min_label, max_label) = if path.is_empty() {
+                    (String::new(), String::new())
+                } else {
+                    (format!("{lo:.0}°"), format!("{hi:.0}°"))
+                };
+                rows.push(SensorData {
+                    name: sensor_config.sensors[i].name.clone().into(),
+                    value_text: match last_valid[i] {
+                        Some(temp) => format!("{temp:.1} °C").into(),
+                        None => "--".into(),
+                    },
+                    ok: readings[i].is_some(),
+                    history_path: path.into(),
+                    hist_min_text: min_label.into(),
+                    hist_max_text: max_label.into(),
+                });
+            }
+
+            let energy_text: slint::SharedString = match last_energy {
+                Some(energy_kwh) => format!("{energy_kwh:.1}").into(),
+                None => "-.-".into(),
+            };
+            let all_sensors_ok = readings.iter().all(Option::is_some);
+            let mqtt_ok = connected.load(Ordering::Relaxed);
+            // First configured sensor is at the top of the tank.
+            let top_color = color_for(last_valid.first().copied().flatten());
+            let bottom_color = color_for(last_valid.last().copied().flatten());
 
             // Batch UI updates and send them to the main Slint thread.
-            // We recreate the sensors model with the latest data and history paths.
-            let _ = slint::invoke_from_event_loop({
-                let ui_weak = ui_weak.clone();
-                let temps = temps.clone();
-                let history_paths: Vec<String> = history.iter().map(|h| h.to_svg_path()).collect();
-                let sensor_names: Vec<String> = sensor_config.sensors.iter().map(|s| s.name.clone()).collect();
-                move || {
-                    if let Some(ui) = ui_weak.upgrade() {
-                        let mut sensor_data = Vec::new();
-                        for i in 0..temps.len() {
-                            sensor_data.push(SensorData {
-                                name: sensor_names[i].clone().into(),
-                                value: temps[i],
-                                history_path: history_paths[i].clone().into(),
-                            });
-                        }
-                        ui.set_sensors(slint::ModelRc::from(sensor_data.as_slice()));
-                        ui.set_energy_kwh(energy_kwh);
-                    }
+            let ui_weak = ui_weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_sensors(slint::ModelRc::from(rows.as_slice()));
+                    ui.set_energy_text(energy_text);
+                    ui.set_mqtt_connected(mqtt_ok);
+                    ui.set_sensors_ok(all_sensors_ok);
+                    ui.set_boiler_top_color(top_color);
+                    ui.set_boiler_bottom_color(bottom_color);
                 }
             });
         }
@@ -180,4 +291,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ui.run()?;
 
     Ok(())
+}
+
+/// Marks the connection as lost and returns whether it was previously up.
+fn mqtt_was_connected(connected: &AtomicBool) -> bool {
+    connected.swap(false, Ordering::Relaxed)
 }
