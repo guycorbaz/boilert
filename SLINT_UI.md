@@ -4,7 +4,7 @@ This document describes the user interface of the BoilerT application, implement
 
 ## Overview
 
-The interface is designed for an 800x480 screen (the official Raspberry Pi 7" touch display) and manages the display of boiler status and temperature sensor data. An optional kiosk mode (`[ui] fullscreen = true` in `config.toml`) makes the window fullscreen.
+The interface is designed for an 800x480 screen (the official Raspberry Pi 7" touch display) and manages the display of boiler status and temperature sensor data. The window is borderless (`no-frame`) so the full panel is usable; an optional kiosk mode (`[ui] fullscreen = true` in `config.toml`) makes it fullscreen.
 
 The look is a modern dark theme: dark surfaces with rounded cards, text tokens (primary/secondary/muted), a blue data series for the graphs, and reserved status colors (green/amber/red). All of it is centralized in the `Theme` global.
 
@@ -47,8 +47,8 @@ The main entry point of the UI. It manages top-level state and page navigation.
 The default landing page.
 
 - **`DashboardPage`**:
-  - Displays the `Boiler` tank tinted with the measured stratification gradient, with the top/bottom temperatures labeled next to it.
-  - Shows the stored energy as a hero number inside a card.
+  - Displays the `Boiler` drawing tinted with the measured stratification gradient, with the top/bottom temperatures labeled next to it.
+  - Shows the stored energy as a hero number inside a card, with a 24 h history graph of the stored energy below it (same style as the sensor graphs, 320x100 viewbox).
   - Shows an MQTT connection chip (green/red dot + label) and a sensor failure chip (amber, icon + label) in the top right.
   - `NavButton` "Statistiques" navigates to the statistics page.
 
@@ -79,11 +79,11 @@ A card displaying an individual sensor.
 
 ### [boiler.slint](ui/boiler.slint)
 
-Visual representation of the hot water tank, drawn entirely in Slint (no bitmap asset).
+Visual representation of the hot water tank.
 
 - **`Boiler`**:
-  - A rounded cylinder filled with a 6-stop vertical gradient (`c0` at the top … `c5` at the bottom). The backend interpolates the measured sensor temperatures along the tank height, so the tank shows the *actual* stratification — warm colors at the top, cold at the bottom.
-  - A soft vertical highlight suggests a curved metallic surface.
+  - Renders the hand-drawn `assets/boiler.svg` (tank with pipes), colorized with a 6-stop vertical gradient (`c0` at the top … `c5` at the bottom). The backend interpolates the measured sensor temperatures along the tank height, so the drawing shows the *actual* stratification.
+  - The temperature→color mapping is a "coolwarm" ramp (blue → pale blue → amber → red), which avoids muddy purples and green hues.
 
 ### [pages.slint](ui/pages.slint)
 

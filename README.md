@@ -6,7 +6,8 @@
 
 - **Real-time Monitoring**: Visualizes from 1 to 6 temperature sensors simultaneously, depending on configuration.
 - **Energy Calculation**: Automatically calculates the thermal energy stored in your boiler (kWh), slice by slice, ignoring failed sensors.
-- **Stratification Display**: The boiler silhouette is tinted with a gradient computed from the measured top/bottom temperatures.
+- **Stratification Display**: The boiler drawing is tinted with a 6-stop gradient interpolated from the measured temperatures (hot at the top, cold at the bottom).
+- **Energy History**: A 24-hour graph of the stored energy is shown below the total on the dashboard.
 - **Temperature History**: Displays an auto-scaled 24-hour history graph for each sensor (15-minute resolution), persisted across restarts.
 - **MQTT Integration**: Publishes retained sensor data, energy metrics, and an availability topic (last will) to your home automation system.
 - **Status Indicators**: MQTT connection state and sensor failures are visible directly on the screen.
@@ -180,6 +181,12 @@ This section documents the issues identified during the code review of v1.0.0 an
 - Config path as CLI argument, validation at load (1-6 sensors, positive volume/coefficient).
 - `tracing`-based logging controlled by `RUST_LOG`, systemd unit in `deploy/`.
 - Kiosk fullscreen option, realistic simulation (slow stratified random walk), unit tests.
+
+### UI refinements (v1.3.0)
+
+- **Borderless window** (`no-frame`): the title bar no longer pushes the buttons off the 800x480 panel.
+- **Boiler drawing restored**: back to the hand-drawn SVG (with its pipes), tinted with the measured 6-stop stratification gradient. The temperature→color ramp is now a "coolwarm" scale (blue → pale blue → amber → red) instead of a direct blue→red interpolation that produced muddy purples.
+- **Stored-energy history graph**: a 24 h auto-scaled graph below the total in the energy card, persisted like the sensor histories (older history files without it are still accepted).
 
 ### UI overhaul (v1.2.0)
 

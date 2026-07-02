@@ -15,10 +15,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const HISTORY_POINTS: usize = 96;
 /// Seconds between two history points (15 minutes).
 pub const POINT_INTERVAL_S: u64 = 15 * 60;
-/// Width of the SVG viewbox the graph is rendered into. Slint scales a Path
+/// Width of the SVG viewbox of the sensor card graphs. Slint scales a Path
 /// viewbox preserving its aspect ratio, so this matches the ~6:1 aspect of
-/// the graph area in the sensor cards (height is 100).
-pub const GRAPH_VIEW_W: f32 = 600.0;
+/// the graph area in the sensor cards (height is always 100).
+pub const SENSOR_GRAPH_VIEW_W: f32 = 600.0;
+/// Width of the SVG viewbox of the energy graph on the dashboard (matches
+/// the 320x100 px graph area of the energy card).
+pub const ENERGY_GRAPH_VIEW_W: f32 = 320.0;
 
 /// Rolling buffer of temperature values for a single sensor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,11 +47,11 @@ impl SensorHistory {
     /// Maps the history to SVG paths for Slint's `Path` elements, auto-scaled
     /// to the data.
     ///
-    /// The X axis spans 0..=[`GRAPH_VIEW_W`]. The Y axis is auto-scaled to
-    /// the data (with a margin and a minimum 5 °C span) and mapped to the
-    /// 0..100 viewbox, 0 being the hottest bound at the top.
+    /// The X axis spans 0..=`view_w`. The Y axis is auto-scaled to the data
+    /// (with a margin and at least a `min_span` range) and mapped to the
+    /// 0..100 viewbox, 0 being the highest bound at the top.
     /// Gaps lift the pen, so sensor failures don't draw misleading lines.
-    pub fn svg_graph(&self) -> SvgGraph {
+    pub fn svg_graph(&self, view_w: f32, min_span: f32) -> SvgGraph {
         let valid: Vec<f32> = self.points.iter().flatten().copied().collect();
         if valid.is_empty() {
             return SvgGraph {
@@ -60,19 +63,20 @@ impl SensorHistory {
         }
         let min = valid.iter().copied().fold(f32::INFINITY, f32::min);
         let max = valid.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        // 1 °C margin on each side, and at least a 5 °C span so that a nearly
-        // flat curve isn't magnified into dramatic swings.
-        let mut lo = min - 1.0;
-        let mut hi = max + 1.0;
-        if hi - lo < 5.0 {
+        // Margin on each side, and at least a `min_span` range so that a
+        // nearly flat curve isn't magnified into dramatic swings.
+        let margin = min_span / 5.0;
+        let mut lo = min - margin;
+        let mut hi = max + margin;
+        if hi - lo < min_span {
             let center = (hi + lo) / 2.0;
-            lo = center - 2.5;
-            hi = center + 2.5;
+            lo = center - min_span / 2.0;
+            hi = center + min_span / 2.0;
         }
 
         // `line` traces the curve; `fill` closes each contiguous segment down
         // to the baseline (y = 100) so the area under the curve can be filled.
-        let x_step = GRAPH_VIEW_W / (HISTORY_POINTS - 1) as f32;
+        let x_step = view_w / (HISTORY_POINTS - 1) as f32;
         let mut line = String::new();
         let mut fill = String::new();
         let mut segment_last: Option<f32> = None;
@@ -116,12 +120,27 @@ pub struct SvgGraph {
     pub hi: f32,
 }
 
-/// On-disk representation of the history of all sensors.
+/// Full application history: one buffer per sensor plus the stored energy.
+/// This is also the on-disk (JSON) representation.
 #[derive(Serialize, Deserialize)]
-struct HistoryFile {
+pub struct HistoryStore {
     /// Unix timestamp (seconds) of the last save.
     saved_at: u64,
-    sensors: Vec<SensorHistory>,
+    /// One history per configured sensor, in configuration order.
+    pub sensors: Vec<SensorHistory>,
+    /// History of the total stored energy (kWh).
+    #[serde(default = "SensorHistory::new")]
+    pub energy: SensorHistory,
+}
+
+impl HistoryStore {
+    fn new(sensor_count: usize) -> Self {
+        Self {
+            saved_at: 0,
+            sensors: vec![SensorHistory::new(); sensor_count],
+            energy: SensorHistory::new(),
+        }
+    }
 }
 
 fn unix_now() -> u64 {
@@ -133,36 +152,35 @@ fn unix_now() -> u64 {
 
 /// Restores the persisted history, or starts fresh if the file is missing,
 /// unreadable, or no longer matches the configured sensors.
-pub fn load_or_new(path: &str, sensor_count: usize) -> Vec<SensorHistory> {
+pub fn load_or_new(path: &str, sensor_count: usize) -> HistoryStore {
     if !Path::new(path).exists() {
         tracing::info!("No history file at {path}, starting fresh");
-        return vec![SensorHistory::new(); sensor_count];
+        return HistoryStore::new(sensor_count);
     }
     match load(path, sensor_count) {
-        Ok(history) => {
+        Ok(store) => {
             tracing::info!("Restored temperature history from {path}");
-            history
+            store
         }
         Err(e) => {
             tracing::warn!("Could not restore history from {path}: {e:#}");
-            vec![SensorHistory::new(); sensor_count]
+            HistoryStore::new(sensor_count)
         }
     }
 }
 
-fn load(path: &str, sensor_count: usize) -> Result<Vec<SensorHistory>> {
+fn load(path: &str, sensor_count: usize) -> Result<HistoryStore> {
     let content = fs::read_to_string(path).context("read failed")?;
-    let file: HistoryFile = serde_json::from_str(&content).context("parse failed")?;
+    let mut store: HistoryStore = serde_json::from_str(&content).context("parse failed")?;
     ensure!(
-        file.sensors.len() == sensor_count,
+        store.sensors.len() == sensor_count,
         "sensor count changed ({} in file, {} configured)",
-        file.sensors.len(),
+        store.sensors.len(),
         sensor_count
     );
     // Shift the buffers by the downtime so old points keep their time slot.
-    let missed = (unix_now().saturating_sub(file.saved_at) / POINT_INTERVAL_S) as usize;
-    let mut sensors = file.sensors;
-    for history in &mut sensors {
+    let missed = (unix_now().saturating_sub(store.saved_at) / POINT_INTERVAL_S) as usize;
+    for history in store.sensors.iter_mut().chain(std::iter::once(&mut store.energy)) {
         ensure!(
             history.points.len() == HISTORY_POINTS,
             "unexpected point count in history file"
@@ -171,14 +189,15 @@ fn load(path: &str, sensor_count: usize) -> Result<Vec<SensorHistory>> {
             history.add_point(None);
         }
     }
-    Ok(sensors)
+    Ok(store)
 }
 
 /// Saves the history atomically (write to a temp file, then rename).
-pub fn save(path: &str, sensors: &[SensorHistory]) -> Result<()> {
-    let file = HistoryFile {
+pub fn save(path: &str, store: &HistoryStore) -> Result<()> {
+    let file = HistoryStore {
         saved_at: unix_now(),
-        sensors: sensors.to_vec(),
+        sensors: store.sensors.clone(),
+        energy: store.energy.clone(),
     };
     let json = serde_json::to_string(&file).context("serialize failed")?;
     let tmp = format!("{path}.tmp");
@@ -202,7 +221,7 @@ mod tests {
 
     #[test]
     fn empty_history_gives_empty_paths() {
-        let graph = SensorHistory::new().svg_graph();
+        let graph = SensorHistory::new().svg_graph(600.0, 5.0);
         assert!(graph.line.is_empty());
         assert!(graph.fill.is_empty());
     }
@@ -212,7 +231,7 @@ mod tests {
         let mut history = SensorHistory::new();
         history.add_point(Some(50.0));
         history.add_point(Some(50.2));
-        let graph = history.svg_graph();
+        let graph = history.svg_graph(600.0, 5.0);
         assert!(!graph.line.is_empty());
         assert!((graph.hi - graph.lo - 5.0).abs() < 1e-3);
         assert!(graph.lo < 50.0 && graph.hi > 50.2);
@@ -226,7 +245,7 @@ mod tests {
         history.add_point(None);
         history.add_point(Some(42.0));
         history.add_point(Some(43.0));
-        let graph = history.svg_graph();
+        let graph = history.svg_graph(600.0, 5.0);
         // Two separate sub-paths: one before the gap, one after.
         assert_eq!(graph.line.matches('M').count(), 2);
         // The fill closes one area per contiguous segment.
@@ -242,17 +261,38 @@ mod tests {
         let path = dir.join("history.json");
         let path = path.to_str().unwrap();
 
-        let mut history = vec![SensorHistory::new(), SensorHistory::new()];
-        history[0].add_point(Some(55.5));
-        history[1].add_point(Some(22.2));
-        save(path, &history).unwrap();
+        let mut store = HistoryStore::new(2);
+        store.sensors[0].add_point(Some(55.5));
+        store.sensors[1].add_point(Some(22.2));
+        store.energy.add_point(Some(12.3));
+        save(path, &store).unwrap();
 
         let restored = load(path, 2).unwrap();
-        assert_eq!(restored[0].points.last().copied().flatten(), Some(55.5));
-        assert_eq!(restored[1].points.last().copied().flatten(), Some(22.2));
+        assert_eq!(restored.sensors[0].points.last().copied().flatten(), Some(55.5));
+        assert_eq!(restored.sensors[1].points.last().copied().flatten(), Some(22.2));
+        assert_eq!(restored.energy.points.last().copied().flatten(), Some(12.3));
 
         // A different sensor count must be rejected.
         assert!(load(path, 3).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn load_accepts_files_without_energy_history() {
+        // Files written by older versions have no `energy` field.
+        let dir = std::env::temp_dir().join("boilert-history-test-compat");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("history.json");
+        let path = path.to_str().unwrap();
+
+        let store = HistoryStore::new(1);
+        let mut json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&store).unwrap()).unwrap();
+        json.as_object_mut().unwrap().remove("energy");
+        std::fs::write(path, serde_json::to_string(&json).unwrap()).unwrap();
+
+        let restored = load(path, 1).unwrap();
+        assert_eq!(restored.energy.points.len(), HISTORY_POINTS);
         std::fs::remove_file(path).unwrap();
     }
 }

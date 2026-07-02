@@ -7,6 +7,11 @@ export component DashboardPage {
     callback show-stats();
     // Pre-formatted energy currently stored in the boiler (kWh)
     in property <string> energy-text: "-.-";
+    // 24 h history graph of the stored energy
+    in property <string> energy-hist-path: "";
+    in property <string> energy-hist-fill: "";
+    in property <string> energy-hist-min-text: "";
+    in property <string> energy-hist-max-text: "";
     // True while the MQTT broker connection is up
     in property <bool> mqtt-connected: false;
     // False when at least one sensor failed its last reading
@@ -88,12 +93,13 @@ export component DashboardPage {
             }
         }
 
-        // Water tank tinted with the measured stratification
+        // Water tank drawing tinted with the measured stratification
+        // (200x300 matches the SVG's aspect ratio)
         Boiler {
-            x: 70px;
-            y: 96px;
-            width: 190px;
-            height: 330px;
+            x: 64px;
+            y: 92px;
+            width: 200px;
+            height: 300px;
             c0: root.c0;
             c1: root.c1;
             c2: root.c2;
@@ -104,26 +110,26 @@ export component DashboardPage {
 
         // Top / bottom tank temperatures next to the tank
         Text {
-            x: 278px;
-            y: 112px;
+            x: 286px;
+            y: 106px;
             text: "Haut  " + root.top-temp-text;
             color: Theme.text-secondary;
             font-size: 13pt;
         }
         Text {
-            x: 278px;
-            y: 392px;
+            x: 286px;
+            y: 360px;
             text: "Bas  " + root.bottom-temp-text;
             color: Theme.text-secondary;
             font-size: 13pt;
         }
 
-        // Stored energy card (hero number)
+        // Stored energy card: hero number + 24 h history graph
         Rectangle {
             x: 412px;
-            y: 110px;
+            y: 92px;
             width: parent.width - 412px - Theme.pad;
-            height: 210px;
+            height: 300px;
             border-radius: Theme.radius;
             background: Theme.card;
             border-width: 1px;
@@ -131,22 +137,22 @@ export component DashboardPage {
 
             Text {
                 x: 26px;
-                y: 22px;
+                y: 16px;
                 text: "Énergie stockée";
                 color: Theme.text-secondary;
                 font-size: 13pt;
             }
             HorizontalLayout {
                 x: 26px;
-                y: 56px;
-                height: 120px;
+                y: 40px;
+                height: 96px;
                 spacing: 14px;
                 alignment: start;
 
                 Text {
                     text: root.energy-text;
                     color: Theme.text-primary;
-                    font-size: 50pt;
+                    font-size: 46pt;
                     font-weight: 800;
                     vertical-alignment: center;
                 }
@@ -156,6 +162,64 @@ export component DashboardPage {
                     font-size: 18pt;
                     vertical-alignment: center;
                 }
+            }
+
+            // Evolution of the stored energy over the last 24 hours
+            energy-graph := Rectangle {
+                x: 26px;
+                y: 156px;
+                width: 320px;
+                height: 100px;
+
+                // Recessive gridlines (top, middle, baseline)
+                Rectangle { y: 0; width: 100%; height: 1px; background: #ffffff12; }
+                Rectangle { y: parent.height / 2; width: 100%; height: 1px; background: #ffffff12; }
+                Rectangle { y: parent.height - 1px; width: 100%; height: 1px; background: #ffffff1e; }
+
+                // The 320x100 viewbox matches this area's aspect ratio
+                // (Slint scales a Path preserving the aspect ratio).
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: 320;
+                    viewbox-height: 100;
+                    fill: @linear-gradient(180deg, #3987e54d 0%, #3987e500 100%);
+                    commands: root.energy-hist-fill;
+                }
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: 320;
+                    viewbox-height: 100;
+                    stroke: Theme.series;
+                    stroke-width: 2px;
+                    commands: root.energy-hist-path;
+                }
+
+                // Auto-scale bounds (kWh)
+                Text {
+                    x: 4px;
+                    y: 1px;
+                    text: root.energy-hist-max-text;
+                    color: Theme.text-muted;
+                    font-size: 9pt;
+                }
+                Text {
+                    x: 4px;
+                    y: parent.height - self.height - 2px;
+                    text: root.energy-hist-min-text;
+                    color: Theme.text-muted;
+                    font-size: 9pt;
+                }
+            }
+
+            // Graph caption
+            Text {
+                x: 26px;
+                y: 262px;
+                text: "24 dernières heures";
+                color: Theme.text-muted;
+                font-size: 9pt;
             }
         }
 

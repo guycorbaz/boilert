@@ -7,12 +7,20 @@ export component AppWindow inherits Window {
     height: 480px;
     background: Theme.bg;
     title: "boilert";
+    // Borderless: no title bar, so the full 800x480 panel is usable
+    no-frame: true;
 
     // Flag to control which page to display (0: Dashboard, 1: Statistics)
     property <int> active-page: 0;
 
     // Pre-formatted total thermal energy stored (kWh), from the Rust backend
     in property <string> energy-text: "-.-";
+
+    // 24 h history graph of the stored energy (SVG paths + scale labels)
+    in property <string> energy-hist-path: "";
+    in property <string> energy-hist-fill: "";
+    in property <string> energy-hist-min-text: "";
+    in property <string> energy-hist-max-text: "";
 
     // SemVer compatible application version string
     in property <string> app-version: "0.0.0";
@@ -43,6 +51,10 @@ export component AppWindow inherits Window {
         width: parent.width;
         height: parent.height;
         energy-text: root.energy-text;
+        energy-hist-path: root.energy-hist-path;
+        energy-hist-fill: root.energy-hist-fill;
+        energy-hist-min-text: root.energy-hist-min-text;
+        energy-hist-max-text: root.energy-hist-max-text;
         mqtt-connected: root.mqtt-connected;
         sensors-ok: root.sensors-ok;
         top-temp-text: root.sensors.length > 0 ? root.sensors[0].value-text : "--";

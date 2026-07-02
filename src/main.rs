@@ -22,12 +22,28 @@ const READ_INTERVAL: Duration = Duration::from_secs(2);
 /// Interval between two history points (15-minute resolution).
 const HISTORY_INTERVAL: Duration = Duration::from_secs(history::POINT_INTERVAL_S);
 
-/// Maps a water temperature to a display color: blue (#3987e5) at 15 °C,
-/// red (#e34948) at 65 °C — the diverging cold/hot pair of the palette.
+/// Maps a water temperature to a display color along a "coolwarm" ramp:
+/// blue (cold) → pale blue → amber → red (hot). The piecewise anchors avoid
+/// both the muddy purples of a direct blue→red interpolation and green hues.
 fn temp_to_color(temp: f32) -> slint::Color {
-    let f = ((temp - 15.0) / 50.0).clamp(0.0, 1.0);
-    let lerp = |a: f32, b: f32| (a + (b - a) * f).round() as u8;
-    slint::Color::from_rgb_u8(lerp(57.0, 227.0), lerp(135.0, 73.0), lerp(229.0, 72.0))
+    const ANCHORS: [(f32, [f32; 3]); 4] = [
+        (15.0, [46.0, 124.0, 214.0]),  // cold: blue (#2e7cd6)
+        (35.0, [168.0, 196.0, 224.0]), // cool: pale blue (#a8c4e0)
+        (45.0, [232.0, 178.0, 60.0]),  // warm: amber (#e8b23c)
+        (65.0, [224.0, 68.0, 46.0]),   // hot: red (#e0442e)
+    ];
+    let t = temp.clamp(ANCHORS[0].0, ANCHORS[ANCHORS.len() - 1].0);
+    for pair in ANCHORS.windows(2) {
+        let (t0, c0) = pair[0];
+        let (t1, c1) = pair[1];
+        if t <= t1 {
+            let f = (t - t0) / (t1 - t0);
+            let lerp = |i: usize| (c0[i] + (c1[i] - c0[i]) * f).round() as u8;
+            return slint::Color::from_rgb_u8(lerp(0), lerp(1), lerp(2));
+        }
+    }
+    // Unreachable: `t` is clamped to the anchor range.
+    slint::Color::from_rgb_u8(110, 110, 110)
 }
 
 /// Color for a possibly-unknown temperature (gray when no reading yet).
@@ -182,8 +198,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Sensor reads can be slow; don't try to catch up on missed ticks.
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        // 24 h history, restored from disk when available.
-        let mut hist = history::load_or_new(&sensor_config.history_file, sensor_count);
+        // 24 h history (sensors + stored energy), restored from disk.
+        let mut store = history::load_or_new(&sensor_config.history_file, sensor_count);
         let mut last_history_update = Instant::now();
 
         let publish_interval = Duration::from_secs(sensor_config.mqtt.publish_interval_s);
@@ -241,11 +257,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // persisted so a restart doesn't wipe the graphs.
             let now = Instant::now();
             if now.duration_since(last_history_update) >= HISTORY_INTERVAL {
-                for (sensor_history, reading) in hist.iter_mut().zip(&readings) {
+                for (sensor_history, reading) in store.sensors.iter_mut().zip(&readings) {
                     sensor_history.add_point(*reading);
                 }
+                store.energy.add_point(energy_now);
                 last_history_update = now;
-                if let Err(e) = history::save(&sensor_config.history_file, &hist) {
+                if let Err(e) = history::save(&sensor_config.history_file, &store) {
                     warn!(
                         "Failed to persist history to {}: {e:#}",
                         sensor_config.history_file
@@ -282,7 +299,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Prepare display data off the UI thread.
             let mut rows: Vec<SensorData> = Vec::with_capacity(sensor_count);
             for i in 0..sensor_count {
-                let graph = hist[i].svg_graph();
+                let graph = store.sensors[i].svg_graph(history::SENSOR_GRAPH_VIEW_W, 5.0);
                 let (min_label, max_label) = if graph.line.is_empty() {
                     (String::new(), String::new())
                 } else {
@@ -311,12 +328,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Tank gradient stops, top (first sensor) to bottom (last sensor).
             let strat = stratification_colors(&last_valid);
 
+            // 24 h stored-energy graph shown on the dashboard.
+            let energy_graph = store.energy.svg_graph(history::ENERGY_GRAPH_VIEW_W, 2.0);
+            let (energy_min_label, energy_max_label) = if energy_graph.line.is_empty() {
+                (String::new(), String::new())
+            } else {
+                (
+                    format!("{:.1}", energy_graph.lo),
+                    format!("{:.1}", energy_graph.hi),
+                )
+            };
+
             // Batch UI updates and send them to the main Slint thread.
             let ui_weak = ui_weak.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = ui_weak.upgrade() {
                     ui.set_sensors(slint::ModelRc::from(rows.as_slice()));
                     ui.set_energy_text(energy_text);
+                    ui.set_energy_hist_path(energy_graph.line.into());
+                    ui.set_energy_hist_fill(energy_graph.fill.into());
+                    ui.set_energy_hist_min_text(energy_min_label.into());
+                    ui.set_energy_hist_max_text(energy_max_label.into());
                     ui.set_mqtt_connected(mqtt_ok);
                     ui.set_sensors_ok(all_sensors_ok);
                     ui.set_boiler_c0(strat[0]);
