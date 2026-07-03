@@ -39,6 +39,13 @@ pub fn parse_w1_slave(content: &str) -> Result<f32> {
     let temp_milli: f32 = raw
         .parse()
         .with_context(|| format!("invalid temperature value '{raw}'"))?;
+    // The DS18B20 powers up with +85 °C in its register: after a brown-out,
+    // a read can return exactly 85000 with a valid CRC even though no
+    // conversion ran. Reject it like a CRC failure; a genuine reading of
+    // exactly 85.000 °C is not plausible for domestic hot water.
+    if temp_milli == 85000.0 {
+        anyhow::bail!("power-on reset value (+85 °C), conversion did not run");
+    }
     let temp = temp_milli / 1000.0;
     // Round to 2 decimal places
     Ok((temp * 100.0).round() / 100.0)
@@ -133,5 +140,14 @@ mod tests {
     #[test]
     fn rejects_malformed_temperature() {
         assert!(parse_w1_slave("xx YES\nxx t=abc\n").is_err());
+    }
+
+    #[test]
+    fn rejects_power_on_reset_value() {
+        // +85 °C is the DS18B20 power-up register value: a valid-CRC read
+        // of exactly 85000 means the conversion never ran.
+        assert!(parse_w1_slave("xx : crc=57 YES\nxx t=85000\n").is_err());
+        // Nearby genuine values must still pass.
+        assert!(parse_w1_slave("xx : crc=57 YES\nxx t=84938\n").is_ok());
     }
 }
