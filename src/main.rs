@@ -54,41 +54,12 @@ fn color_for(temp: Option<f32>) -> slint::Color {
     }
 }
 
-/// Interpolates the temperature at relative tank height `p` (0.0 = top,
-/// 1.0 = bottom) from the valid sensor readings, or `None` if there are none.
-fn interpolate_at(known: &[(f32, f32)], p: f32) -> Option<f32> {
-    let (first, last) = (known.first()?, known.last()?);
-    if p <= first.0 {
-        return Some(first.1);
-    }
-    if p >= last.0 {
-        return Some(last.1);
-    }
-    for pair in known.windows(2) {
-        let (p0, t0) = pair[0];
-        let (p1, t1) = pair[1];
-        if p <= p1 {
-            let f = if p1 > p0 { (p - p0) / (p1 - p0) } else { 0.0 };
-            return Some(t0 + (t1 - t0) * f);
-        }
-    }
-    Some(last.1)
-}
-
 /// Computes the 6 gradient stop colors of the tank display (top to bottom)
 /// by interpolating the valid sensor temperatures along the tank height.
 /// The first configured sensor is at the top of the tank.
 fn stratification_colors(last_valid: &[Option<f32>]) -> [slint::Color; 6] {
-    let n = last_valid.len();
-    let known: Vec<(f32, f32)> = last_valid
-        .iter()
-        .enumerate()
-        .filter_map(|(i, temp)| {
-            let pos = if n > 1 { i as f32 / (n - 1) as f32 } else { 0.5 };
-            temp.map(|t| (pos, t))
-        })
-        .collect();
-    std::array::from_fn(|k| color_for(interpolate_at(&known, k as f32 / 5.0)))
+    let known = energy::known_profile(last_valid);
+    std::array::from_fn(|k| color_for(energy::interpolate_at(&known, k as f32 / 5.0)))
 }
 
 #[tokio::main]
@@ -245,10 +216,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
 
-            // Energy is computed from the sensors that answered this tick,
-            // so a failed sensor no longer drags the average down to 0 °C.
-            let valid: Vec<f32> = readings.iter().flatten().copied().collect();
-            let energy_now = energy::stored_energy_kwh(&valid, &sensor_config.boiler);
+            // Energy is computed from the same interpolated profile as the
+            // tank drawing (last known value per position, failed slices
+            // interpolated from their neighbors), so the slice weighting
+            // stays correct when sensors fail and the figure matches the
+            // display instead of jumping on a transient read error.
+            let energy_now = energy::stored_energy_kwh(&last_valid, &sensor_config.boiler);
             if energy_now.is_some() {
                 last_energy = energy_now;
             }
@@ -378,25 +351,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn interpolation_covers_the_whole_tank() {
-        // Sensors at the top, middle and bottom of the tank.
-        let known = vec![(0.0, 60.0), (0.5, 40.0), (1.0, 20.0)];
-        assert_eq!(interpolate_at(&known, 0.0), Some(60.0));
-        assert_eq!(interpolate_at(&known, 0.25), Some(50.0));
-        assert_eq!(interpolate_at(&known, 1.0), Some(20.0));
+    fn stratification_uses_gray_when_nothing_is_known() {
+        let gray = slint::Color::from_rgb_u8(110, 110, 110);
+        assert_eq!(stratification_colors(&[None, None]), [gray; 6]);
     }
 
     #[test]
-    fn interpolation_extends_to_edges_when_sensors_fail() {
-        // Only the two middle sensors are valid.
-        let known = vec![(0.4, 50.0), (0.6, 30.0)];
-        assert_eq!(interpolate_at(&known, 0.0), Some(50.0));
-        assert_eq!(interpolate_at(&known, 0.5), Some(40.0));
-        assert_eq!(interpolate_at(&known, 1.0), Some(30.0));
-    }
-
-    #[test]
-    fn no_reading_gives_no_temperature() {
-        assert_eq!(interpolate_at(&[], 0.5), None);
+    fn stratification_is_hot_at_the_top_and_cold_at_the_bottom() {
+        let colors = stratification_colors(&[Some(65.0), Some(15.0)]);
+        assert_eq!(colors[0], temp_to_color(65.0));
+        assert_eq!(colors[5], temp_to_color(15.0));
     }
 }

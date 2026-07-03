@@ -50,7 +50,7 @@
 \ofoot{\color{inkgray}\small\pagemark}
 \setkomafont{headsepline}{\color{accent!40}}
 
-\newcommand{\boilertversion}{1.3.0}
+\newcommand{\boilertversion}{1.3.1}
 
 % ---------------------------------------------------------------------------
 % Graphics & diagrams
@@ -552,9 +552,9 @@ Every \code{publish\_interval\_s} seconds the application publishes
 \end{center}
 
 A sensor that fails to read is \emph{not} published (its previous retained
-value remains on the broker) and the energy is computed from the remaining
-valid sensors. \code{offline} is set automatically by the broker if the
-connection drops (MQTT last will).
+value remains on the broker); for the energy figure its slice is
+interpolated from the neighboring valid sensors. \code{offline} is set
+automatically by the broker if the connection drops (MQTT last will).
 
 Verify from any machine:
 

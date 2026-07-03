@@ -11,7 +11,7 @@
 ## Features
 
 - **Real-time Monitoring**: Visualizes from 1 to 6 temperature sensors simultaneously, depending on configuration.
-- **Energy Calculation**: Automatically calculates the thermal energy stored in your boiler (kWh), slice by slice, ignoring failed sensors.
+- **Energy Calculation**: Automatically calculates the thermal energy stored in your boiler (kWh), slice by slice; the slice of a failed sensor is interpolated from its neighbors, consistently with the tank drawing.
 - **Stratification Display**: The boiler drawing is tinted with a 6-stop gradient interpolated from the measured temperatures (hot at the top, cold at the bottom).
 - **Energy History**: A 24-hour graph of the stored energy is shown below the total on the dashboard.
 - **Temperature History**: An auto-scaled 24-hour graph for each sensor (15-minute resolution), persisted across restarts.
@@ -151,7 +151,7 @@ The application publishes **retained** messages (QoS 1, client id `boilert-<pid>
 | `{base_topic}/energy` | Total energy stored in the boiler | `f32` (kWh, 3 decimals) |
 | `{base_topic}/status` | Availability (last will) | `online` / `offline` |
 
-- A sensor that fails to read is *not* published (its last retained value stays on the broker), and the energy value is computed from the remaining valid sensors.
+- A sensor that fails to read is *not* published (its last retained value stays on the broker); for the energy value its slice is interpolated from the neighboring sensors.
 - `online` is published (retained) after each successful connection; `offline` is set by the broker through the last will when the connection drops.
 - An unreachable broker never blocks the measurement loop: publications are queued and dropped if the queue is full.
 
@@ -186,9 +186,11 @@ Each sensor represents an equal horizontal slice of the cylindrical tank (sensor
 
 Slices colder than `reference_temp_c` contribute zero rather than a negative amount. With all slices above the reference this reduces to the classic `V * ΔT_avg * 1.162 / 1000` formula.
 
+The temperature `Tᵢ` of a slice whose sensor has no valid reading is interpolated linearly from the neighboring valid sensors (clamped at the tank ends) — the same profile used to tint the tank drawing — so failed sensors never change the slice weighting.
+
 ### Sensor Reading
 
-DS18B20 conversions take ~750 ms each, so all sensors are read **in parallel on blocking threads** at every 2-second tick. A failed reading (CRC error, unplugged sensor) is displayed in red in the UI, leaves a gap in the history, and is excluded from the energy calculation.
+DS18B20 conversions take ~750 ms each, so all sensors are read **in parallel on blocking threads** at every 2-second tick. A failed reading (CRC error, unplugged sensor) is displayed in red in the UI, leaves a gap in the history, and its slice is interpolated in the energy calculation. The DS18B20 power-on reset value (exactly +85 °C) is rejected as a failed conversion rather than taken as a real temperature.
 
 ### History
 
@@ -202,6 +204,11 @@ DS18B20 conversions take ~750 ms each, so all sensors are read **in parallel on 
 ## Design & Engineering Notes
 
 This section documents, release by release (most recent first), the issues identified during the review of v1.0.0 and how they were addressed.
+
+### Measurement robustness (v1.3.1)
+
+- **Failed sensors mis-weighted the energy calculation** ([#1](https://github.com/guycorbaz/boilert/issues/1)): the tank volume was divided by the number of *valid* readings, silently redistributing the failed slices' volume (with only the top sensor answering, the whole tank was counted at its temperature). The energy is now computed from the last known value per position, with failed slices interpolated from their neighbors — the exact profile the tank drawing shows.
+- **The DS18B20 power-on reset value (+85 °C) was accepted as a real reading** ([#2](https://github.com/guycorbaz/boilert/issues/2)): after a sensor brown-out, a read can return exactly 85 °C with a valid CRC even though no conversion ran, spiking the published values and the history. It is now rejected like a CRC failure.
 
 ### UI refinements (v1.3.0)
 
