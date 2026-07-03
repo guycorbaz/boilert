@@ -105,6 +105,8 @@ impl Config {
 
     /// Checks that the configured values are usable.
     fn validate(&self) -> Result<()> {
+        use std::collections::HashSet;
+
         ensure!(
             !self.sensors.is_empty(),
             "at least one sensor must be configured"
@@ -115,10 +117,36 @@ impl Config {
             MAX_SENSORS,
             self.sensors.len()
         );
+        let mut names = HashSet::new();
+        let mut ids = HashSet::new();
+        for sensor in &self.sensors {
+            ensure!(!sensor.name.is_empty(), "sensor names must not be empty");
+            ensure!(
+                !sensor.name.contains(['/', '+', '#']),
+                "sensor name '{}' contains an MQTT topic character (/ + #)",
+                sensor.name
+            );
+            ensure!(!sensor.id.is_empty(), "sensor ids must not be empty");
+            ensure!(
+                names.insert(&sensor.name),
+                "duplicate sensor name '{}': both would publish to the same MQTT topic",
+                sensor.name
+            );
+            ensure!(
+                ids.insert(&sensor.id),
+                "duplicate sensor id '{}': the same probe cannot be at two positions",
+                sensor.id
+            );
+        }
         ensure!(self.boiler.volume_l > 0.0, "boiler.volume_l must be positive");
         ensure!(
             self.boiler.energy_coefficient > 0.0,
             "boiler.energy_coefficient must be positive"
+        );
+        ensure!(
+            (0.0..=40.0).contains(&self.boiler.reference_temp_c),
+            "boiler.reference_temp_c must be between 0 and 40 °C (cold water baseline), got {}",
+            self.boiler.reference_temp_c
         );
         ensure!(
             self.mqtt.publish_interval_s > 0,
@@ -177,5 +205,40 @@ energy_coefficient = 1.162
     fn rejects_non_positive_volume() {
         let content = config_with_sensors(1).replace("volume_l = 500.0", "volume_l = 0.0");
         assert!(Config::from_toml(&content).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_sensor_names() {
+        let content =
+            config_with_sensors(1) + "\n[[sensors]]\nname = \"T0\"\nid = \"28-fffffffffff0\"\n";
+        assert!(Config::from_toml(&content).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_sensor_ids() {
+        let content =
+            config_with_sensors(1) + "\n[[sensors]]\nname = \"Tbis\"\nid = \"28-000000000000\"\n";
+        assert!(Config::from_toml(&content).is_err());
+    }
+
+    #[test]
+    fn rejects_mqtt_topic_characters_in_sensor_names() {
+        for bad in ["Top/1", "Top+", "Top#", ""] {
+            let content =
+                config_with_sensors(1).replace("name = \"T0\"", &format!("name = \"{bad}\""));
+            assert!(
+                Config::from_toml(&content).is_err(),
+                "name {bad:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_implausible_reference_temperature() {
+        for bad in ["-5.0", "95.0"] {
+            let content = config_with_sensors(1)
+                .replace("reference_temp_c = 15.0", &format!("reference_temp_c = {bad}"));
+            assert!(Config::from_toml(&content).is_err());
+        }
     }
 }
