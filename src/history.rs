@@ -141,6 +141,22 @@ impl HistoryStore {
             energy: SensorHistory::new(),
         }
     }
+
+    /// Appends `points` gaps to every buffer so older points keep their time
+    /// slot after downtime or a forward wall-clock jump.
+    pub fn shift(&mut self, points: usize) {
+        for history in self.buffers() {
+            for _ in 0..points.min(HISTORY_POINTS) {
+                history.add_point(None);
+            }
+        }
+    }
+
+    fn buffers(&mut self) -> impl Iterator<Item = &mut SensorHistory> {
+        self.sensors
+            .iter_mut()
+            .chain(std::iter::once(&mut self.energy))
+    }
 }
 
 fn unix_now() -> u64 {
@@ -178,22 +194,28 @@ fn load(path: &str, sensor_count: usize) -> Result<HistoryStore> {
         store.sensors.len(),
         sensor_count
     );
-    // Shift the buffers by the downtime so old points keep their time slot.
-    let missed = (unix_now().saturating_sub(store.saved_at) / POINT_INTERVAL_S) as usize;
-    for history in store.sensors.iter_mut().chain(std::iter::once(&mut store.energy)) {
+    for history in store.buffers() {
         ensure!(
             history.points.len() == HISTORY_POINTS,
             "unexpected point count in history file"
         );
-        for _ in 0..missed.min(HISTORY_POINTS) {
-            history.add_point(None);
-        }
     }
+    // Shift the buffers by the downtime so old points keep their time slot.
+    // At boot on a Pi without an RTC the clock can still be behind (NTP not
+    // yet synced): saturating_sub then yields 0 and the forward clock jump
+    // is compensated later by the jump detection in the main loop.
+    let missed = (unix_now().saturating_sub(store.saved_at) / POINT_INTERVAL_S) as usize;
+    store.shift(missed);
     Ok(store)
 }
 
-/// Saves the history atomically (write to a temp file, then rename).
+/// Saves the history atomically and durably: write to a temp file, fsync it,
+/// rename it over the target, then fsync the parent directory. Without the
+/// fsyncs, a power cut (the normal way a wall-mounted kiosk is turned off)
+/// could leave an empty file behind the already-visible rename.
 pub fn save(path: &str, store: &HistoryStore) -> Result<()> {
+    use std::io::Write;
+
     let file = HistoryStore {
         saved_at: unix_now(),
         sensors: store.sensors.clone(),
@@ -201,8 +223,20 @@ pub fn save(path: &str, store: &HistoryStore) -> Result<()> {
     };
     let json = serde_json::to_string(&file).context("serialize failed")?;
     let tmp = format!("{path}.tmp");
-    fs::write(&tmp, json).with_context(|| format!("failed to write {tmp}"))?;
+    {
+        let mut f = fs::File::create(&tmp).with_context(|| format!("failed to create {tmp}"))?;
+        f.write_all(json.as_bytes())
+            .with_context(|| format!("failed to write {tmp}"))?;
+        f.sync_all().with_context(|| format!("failed to sync {tmp}"))?;
+    }
     fs::rename(&tmp, path).with_context(|| format!("failed to rename {tmp} to {path}"))?;
+    let dir = match Path::new(path).parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    fs::File::open(dir)
+        .and_then(|d| d.sync_all())
+        .with_context(|| format!("failed to sync directory {}", dir.display()))?;
     Ok(())
 }
 
@@ -252,6 +286,21 @@ mod tests {
         assert_eq!(graph.fill.matches('Z').count(), 2);
         // Each fill area starts and ends on the baseline (y = 100).
         assert_eq!(graph.fill.matches("100 ").count(), 4);
+    }
+
+    #[test]
+    fn shift_moves_points_back_and_pads_with_gaps() {
+        let mut store = HistoryStore::new(1);
+        store.sensors[0].add_point(Some(50.0));
+        store.energy.add_point(Some(10.0));
+        store.shift(2);
+        let n = HISTORY_POINTS;
+        assert_eq!(store.sensors[0].points[n - 3], Some(50.0));
+        assert_eq!(store.sensors[0].points[n - 1], None);
+        assert_eq!(store.energy.points[n - 3], Some(10.0));
+        // A huge shift is capped at the buffer size and empties it.
+        store.shift(usize::MAX);
+        assert!(store.sensors[0].points.iter().all(Option::is_none));
     }
 
     #[test]

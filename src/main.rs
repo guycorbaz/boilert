@@ -9,7 +9,7 @@ mod sensors;
 use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use slint::ComponentHandle;
 use tokio::time::{self, MissedTickBehavior};
@@ -173,6 +173,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mut store = history::load_or_new(&sensor_config.history_file, sensor_count);
         let mut last_history_update = Instant::now();
 
+        // Wall clock vs monotonic clock tracking: on a Pi without an RTC the
+        // wall clock can be hours behind until the first NTP sync, so the
+        // downtime shift applied when restoring the history may be wrong.
+        // Comparing both clocks every tick detects the forward jump.
+        let mut last_mono = Instant::now();
+        let mut last_wall = SystemTime::now();
+
         let publish_interval = Duration::from_secs(sensor_config.mqtt.publish_interval_s);
         let mut last_publish: Option<Instant> = None;
 
@@ -226,9 +233,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 last_energy = energy_now;
             }
 
+            let now = Instant::now();
+
+            // Re-align the restored history when the wall clock jumps forward
+            // (first NTP sync after boot): the downtime shift computed at
+            // load time used the pre-sync clock and missed that many slots.
+            let wall_now = SystemTime::now();
+            let wall_elapsed = wall_now
+                .duration_since(last_wall)
+                .unwrap_or_else(|_| now.duration_since(last_mono));
+            let jump = wall_elapsed.saturating_sub(now.duration_since(last_mono));
+            if jump >= HISTORY_INTERVAL {
+                let points = (jump.as_secs() / history::POINT_INTERVAL_S) as usize;
+                warn!(
+                    "System clock jumped forward by ~{} s (NTP sync?), shifting history by {points} points",
+                    jump.as_secs()
+                );
+                store.shift(points);
+            }
+            last_mono = now;
+            last_wall = wall_now;
+
             // History point every 15 minutes (a failed sensor leaves a gap),
             // persisted so a restart doesn't wipe the graphs.
-            let now = Instant::now();
             if now.duration_since(last_history_update) >= HISTORY_INTERVAL {
                 for (sensor_history, reading) in store.sensors.iter_mut().zip(&readings) {
                     sensor_history.add_point(*reading);
