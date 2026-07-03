@@ -226,6 +226,15 @@ An MQTT broker (e.g.\ Mosquitto) must be reachable on the network. It can run
 on the same Raspberry Pi, on a NAS, or inside Home Assistant.
 \end{note}
 
+\begin{tip}[title={Dedicated interface PCB}]
+Instead of the hand-wired pull-up resistor and screw terminals, you can use
+the \textbf{1-Wire interface board} designed for this project:
+\url{https://github.com/guycorbaz/1wire_raspi_pcb}. It is an open-hardware
+KiCad~9 project that plugs onto the 40-pin GPIO header and provides Molex
+Micro-Fit~3.0 connectors for the probes and an external supply, with the bus
+pull-up and supply filtering already on board.
+\end{tip}
+
 % ===========================================================================
 \section{Hardware installation}
 % ===========================================================================
@@ -344,6 +353,13 @@ Wiring recommendations:
         of total cable is unproblematic for 6 sensors.
   \item Use 3.3\,V, \emph{never} 5\,V: GPIO4 is not 5\,V tolerant.
 \end{itemize}
+
+\begin{note}[title={Using the interface PCB}]
+With the companion board (\url{https://github.com/guycorbaz/1wire_raspi_pcb})
+the wiring above is already done for you: plug the board onto the GPIO
+header and connect each probe to a Micro-Fit connector. The pull-up resistor
+of this section must \emph{not} be added again --- it is on the board.
+\end{note}
 
 % ===========================================================================
 \section{Raspberry Pi preparation}

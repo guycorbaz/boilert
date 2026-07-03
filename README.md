@@ -51,6 +51,7 @@ The user interface is documented in detail in [SLINT_UI.md](SLINT_UI.md).
   - Raspberry Pi with 1-Wire interface enabled (`dtoverlay=w1-gpio` in `/boot/config.txt`).
   - DS18B20 temperature sensors.
   - Official 7" touchscreen (800x480) — the UI is designed for it but runs in a window on any desktop.
+  - A companion **1-Wire interface PCB** for the Raspberry Pi GPIO header is available as a separate KiCad project: [guycorbaz/1wire_raspi_pcb](https://github.com/guycorbaz/1wire_raspi_pcb). It provides Molex Micro-Fit 3.0 connectors for the probes, the bus pull-up resistor and supply filtering, replacing the hand-wired resistor setup.
 
 ---
 
@@ -159,6 +160,8 @@ The application publishes **retained** messages (QoS 1, client id `boilert-<pid>
 ## Deployment on Raspberry Pi
 
 📖 **A detailed installation manual** (bill of materials, sensor placement on the tank, 1-Wire wiring diagram, commissioning, troubleshooting) is available as a PDF: [`docs/installation-manual/installation-manual.pdf`](docs/installation-manual/installation-manual.pdf) (LaTeX sources alongside).
+
+🔌 **Hardware**: the 1-Wire bus can be wired by hand (see the manual) or built with the dedicated interface PCB designed for this project: [guycorbaz/1wire_raspi_pcb](https://github.com/guycorbaz/1wire_raspi_pcb) (KiCad schematics and board layout).
 
 A sample systemd unit is provided in [`deploy/boilert.service`](deploy/boilert.service). Adjust `User`, `WorkingDirectory` and `ExecStart` to your setup, then:
 
