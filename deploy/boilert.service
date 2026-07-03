@@ -1,28 +1,33 @@
-# systemd unit for running boilert on a Raspberry Pi with a desktop session.
+# systemd *user* unit for running boilert on a Raspberry Pi with a desktop
+# session. A user unit (unlike a system unit) inherits the session environment
+# (DISPLAY / WAYLAND_DISPLAY / XAUTHORITY / XDG_RUNTIME_DIR), so it works on
+# both the X11 and the Wayland (Bookworm and later) variants of Raspberry Pi
+# OS without hardcoding display variables.
 #
-# Install:
-#   sudo cp deploy/boilert.service /etc/systemd/system/
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now boilert
+# Install (as the desktop user, NOT with sudo):
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/boilert.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now boilert
 #
-# Logs: journalctl -u boilert -f
+# The unit starts with the graphical session; with the usual kiosk setup
+# (desktop autologin, the Raspberry Pi Imager default) that means at boot.
+#
+# Logs: journalctl --user -u boilert -f
 
 [Unit]
 Description=boilert - water boiler heat monitor
-After=network-online.target graphical.target
-Wants=network-online.target
+PartOf=graphical-session.target
+After=graphical-session.target
 
 [Service]
 Type=simple
-User=pi
-# Directory containing config.toml and the persisted history file
-WorkingDirectory=/home/pi/boilert
-ExecStart=/home/pi/boilert/boilert /home/pi/boilert/config.toml
+# Directory containing config.toml and the persisted history file (%h = home)
+WorkingDirectory=%h/boilert
+ExecStart=%h/boilert/boilert %h/boilert/config.toml
 Restart=on-failure
 RestartSec=5
 Environment=RUST_LOG=info
-# Required to open a window on the local X/Wayland session
-Environment=DISPLAY=:0
 
 [Install]
-WantedBy=graphical.target
+WantedBy=graphical-session.target

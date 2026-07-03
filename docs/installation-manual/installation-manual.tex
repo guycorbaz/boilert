@@ -570,17 +570,25 @@ mosquitto_sub -h mqtt.home.arpa -t 'boilert/sensors/#' -v
 \section{Autostart with systemd}
 % ===========================================================================
 
-A sample unit is provided in \code{deploy/boilert.service}. Adjust
-\code{User}, \code{WorkingDirectory} and \code{ExecStart} to your paths, then:
+A sample systemd \emph{user} unit is provided in \code{deploy/boilert.service}.
+A user service inherits the graphical session environment
+(\code{DISPLAY} / \code{WAYLAND\_DISPLAY} / \code{XDG\_RUNTIME\_DIR}), so the
+same unit works on both the X11 and the Wayland variants of Raspberry~Pi~OS
+(Wayland is the default since Bookworm). Adjust \code{WorkingDirectory} and
+\code{ExecStart} if your paths differ from \code{\textasciitilde/boilert},
+then, as the desktop user (\emph{without} \code{sudo}):
 
 \begin{lstlisting}[language=bash]
-sudo cp deploy/boilert.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now boilert
-journalctl -u boilert -f        # follow the logs
+mkdir -p ~/.config/systemd/user
+cp deploy/boilert.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now boilert
+journalctl --user -u boilert -f     # follow the logs
 \end{lstlisting}
 
-The service restarts automatically on failure. Log verbosity is controlled by
+The unit starts with the graphical session: with the usual kiosk setup
+(desktop autologin, the Raspberry Pi Imager default) that means at boot. The
+service restarts automatically on failure. Log verbosity is controlled by
 the \code{RUST\_LOG} environment variable in the unit (\code{info} by
 default; use \code{debug} while commissioning).
 
@@ -674,7 +682,7 @@ Intentional (kiosk design). Close with Alt+F4 or \code{kill}.\\
 Useful commands while commissioning:
 
 \begin{lstlisting}[language=bash]
-journalctl -u boilert -f                     # application logs
+journalctl --user -u boilert -f              # application logs
 cat /sys/bus/w1/devices/28-*/w1_slave        # raw sensor readout
 mosquitto_sub -h <broker> -t 'boilert/#' -v  # what the broker sees
 RUST_LOG=debug ./boilert config.toml         # verbose foreground run
@@ -687,7 +695,7 @@ A new DS18B20 has a new 1-Wire ID:
   \item Identify the new probe's ID (section~\ref{sec:identify}).
   \item Replace the \code{id} of the corresponding \code{[[sensors]]} entry
         in \code{config.toml} --- keep the same \code{name} and position.
-  \item Restart the service: \code{sudo systemctl restart boilert}.
+  \item Restart the service: \code{systemctl --user restart boilert}.
 \end{enumerate}
 Since the sensor \emph{count} is unchanged, the history is preserved; only
 the replaced sensor's curve continues with the new probe's data.

@@ -163,14 +163,17 @@ The application publishes **retained** messages (QoS 1, client id `boilert-<pid>
 
 🔌 **Hardware**: the 1-Wire bus can be wired by hand (see the manual) or built with the dedicated interface PCB designed for this project: [guycorbaz/1wire_raspi_pcb](https://github.com/guycorbaz/1wire_raspi_pcb) (KiCad schematics and board layout).
 
-A sample systemd unit is provided in [`deploy/boilert.service`](deploy/boilert.service). Adjust `User`, `WorkingDirectory` and `ExecStart` to your setup, then:
+A sample systemd **user** unit is provided in [`deploy/boilert.service`](deploy/boilert.service): as a user service it inherits the session environment, so it works on both the X11 and the Wayland (Bookworm+) variants of Raspberry Pi OS. Adjust `WorkingDirectory` and `ExecStart` if your paths differ from `~/boilert`, then, as the desktop user (no sudo):
 
 ```bash
-sudo cp deploy/boilert.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now boilert
-journalctl -u boilert -f   # follow the logs
+mkdir -p ~/.config/systemd/user
+cp deploy/boilert.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now boilert
+journalctl --user -u boilert -f   # follow the logs
 ```
+
+The service starts with the graphical session — with the usual kiosk setup (desktop autologin) that means at boot.
 
 Set `fullscreen = true` in the `[ui]` section for kiosk mode on the official 7" touchscreen.
 
@@ -209,6 +212,13 @@ This section documents, release by release (most recent first), the issues ident
 
 - **Failed sensors mis-weighted the energy calculation** ([#1](https://github.com/guycorbaz/boilert/issues/1)): the tank volume was divided by the number of *valid* readings, silently redistributing the failed slices' volume (with only the top sensor answering, the whole tank was counted at its temperature). The energy is now computed from the last known value per position, with failed slices interpolated from their neighbors — the exact profile the tank drawing shows.
 - **The DS18B20 power-on reset value (+85 °C) was accepted as a real reading** ([#2](https://github.com/guycorbaz/boilert/issues/2)): after a sensor brown-out, a read can return exactly 85 °C with a valid CRC even though no conversion ran, spiking the published values and the history. It is now rejected like a CRC failure.
+
+### Reliability & operations (v1.3.1)
+
+- **History file could be lost on power cut** ([#4](https://github.com/guycorbaz/boilert/issues/4)): the atomic rename was not preceded by an `fsync`, so a power loss right after a save — the normal way a kiosk gets switched off — could leave an empty file. The temp file and its directory are now synced.
+- **Wrong downtime shift when the Pi boots with a stale clock** ([#5](https://github.com/guycorbaz/boilert/issues/5)): the Pi has no RTC, so the history restore could run before the first NTP sync and misplace old points. The main loop now compares the wall clock against the monotonic clock and re-shifts the history when it detects a forward jump.
+- **systemd unit failed on Wayland-based Raspberry Pi OS** ([#6](https://github.com/guycorbaz/boilert/issues/6)): the sample unit is now a *user* service that inherits the session environment (works on X11 and Wayland) instead of a system service hardcoding `DISPLAY=:0`.
+- **Stricter configuration validation** ([#7](https://github.com/guycorbaz/boilert/issues/7)): duplicate sensor names or 1-Wire ids, empty names, MQTT topic characters (`/`, `+`, `#`) in names and implausible reference temperatures (outside 0–40 °C) are now rejected at startup.
 
 ### UI refinements (v1.3.0)
 
